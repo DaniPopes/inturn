@@ -3,7 +3,7 @@ use std::{collections::hash_map::RandomState, hash::BuildHasher};
 
 /// String interner.
 ///
-/// See the [module docs][self] for more details.
+/// See the [crate-level docs][crate] for more details.
 pub struct Interner<S = Symbol, H = RandomState> {
     pub(crate) inner: BytesInterner<S, H>,
 }
@@ -163,6 +163,6 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     #[must_use]
     pub fn resolve(&self, sym: S) -> &str {
         // SAFETY: Only `str`s are interned.
-        unsafe { str::from_utf8_unchecked(self.inner.resolve(sym)) }
+        unsafe { std::str::from_utf8_unchecked(self.inner.resolve(sym)) }
     }
 }

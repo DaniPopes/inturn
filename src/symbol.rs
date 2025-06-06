@@ -20,7 +20,7 @@ pub trait InternerSymbol: Sized + Copy + std::hash::Hash + Eq {
     fn to_usize(self) -> usize;
 }
 
-/// Default unique identifier for a string in an [`Interner`].
+/// Default unique identifier for a string in an `Interner`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Symbol(NonZeroU32);
 

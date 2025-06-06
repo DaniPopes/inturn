@@ -17,9 +17,9 @@ pub(crate) type RawMapKey<S> = (MapKey, S);
 // TODO: Use a lock-free arena.
 type Arena = ThreadLocal<Bump>;
 
-/// String interner.
+/// Byte string interner.
 ///
-/// See the [module docs][self] for more details.
+/// See the [crate-level docs][crate] for more details.
 pub struct BytesInterner<S = Symbol, H = RandomState> {
     pub(crate) map: Map<S>,
     strs: LFStack<&'static [u8]>,

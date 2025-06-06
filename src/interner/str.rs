@@ -1,9 +1,5 @@
-use crate::{lock_free_stack::LFStack, BytesInterner, InternerSymbol, Symbol};
-use bumpalo::Bump;
-use dashmap::DashMap;
-use hashbrown::hash_table;
+use crate::{BytesInterner, InternerSymbol, Symbol};
 use std::{collections::hash_map::RandomState, hash::BuildHasher};
-use thread_local::ThreadLocal;
 
 /// String interner.
 ///
@@ -78,7 +74,7 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     /// If `s` outlives `self`, like `&'static str`, prefer using
     /// [`intern_static`](Self::intern_static), as it will not allocate the string on the heap.
     pub fn intern(&self, s: &str) -> S {
-        self.inner.intern(s)
+        self.inner.intern(s.as_bytes())
     }
 
     /// Interns a string, returning its unique `Symbol`.
@@ -91,7 +87,7 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     ///
     /// By taking `&mut self`, this never acquires any locks.
     pub fn intern_mut(&mut self, s: &str) -> S {
-        self.inner.intern_mut(s)
+        self.inner.intern_mut(s.as_bytes())
     }
 
     /// Interns a static string, returning its unique `Symbol`.
@@ -99,7 +95,7 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     /// Note that this only requires that `s` outlives `self`, which means we can avoid allocating
     /// the string.
     pub fn intern_static<'a, 'b: 'a>(&'a self, s: &'b str) -> S {
-        self.inner.intern_static(s)
+        self.inner.intern_static(s.as_bytes())
     }
 
     /// Interns a static string, returning its unique `Symbol`.
@@ -109,7 +105,7 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     ///
     /// By taking `&mut self`, this never acquires any locks.
     pub fn intern_mut_static<'a, 'b: 'a>(&'a mut self, s: &'b str) -> S {
-        self.inner.intern_mut_static(s)
+        self.inner.intern_mut_static(s.as_bytes())
     }
 
     /// Interns multiple strings.
@@ -120,7 +116,7 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     /// [`intern_many_static`](Self::intern_many_static), as it will not allocate the strings on the
     /// heap.
     pub fn intern_many<'a>(&self, strings: impl IntoIterator<Item = &'a str>) {
-        self.inner.intern_many(strings);
+        self.inner.intern_many(strings.into_iter().map(str::as_bytes));
     }
 
     /// Interns multiple strings.
@@ -133,7 +129,7 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     ///
     /// By taking `&mut self`, this never acquires any locks.
     pub fn intern_many_mut<'a>(&mut self, strings: impl IntoIterator<Item = &'a str>) {
-        self.inner.intern_many_mut(strings);
+        self.inner.intern_many_mut(strings.into_iter().map(str::as_bytes));
     }
 
     /// Interns multiple static strings.
@@ -141,7 +137,7 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     /// Note that this only requires that the strings outlive `self`, which means we can avoid
     /// allocating the strings.
     pub fn intern_many_static<'a, 'b: 'a>(&'a self, strings: impl IntoIterator<Item = &'b str>) {
-        self.inner.intern_many_static(strings);
+        self.inner.intern_many_static(strings.into_iter().map(str::as_bytes));
     }
 
     /// Interns multiple static strings.
@@ -154,7 +150,7 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
         &'a mut self,
         strings: impl IntoIterator<Item = &'b str>,
     ) {
-        self.inner.intern_many_mut_static(strings);
+        self.inner.intern_many_mut_static(strings.into_iter().map(str::as_bytes));
     }
 
     /// Maps a `Symbol` to its string. This is a cheap, lock-free operation.
@@ -166,6 +162,7 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     #[inline]
     #[must_use]
     pub fn resolve(&self, sym: S) -> &str {
-        self.inner.resolve(sym)
+        // SAFETY: Only `str`s are interned.
+        unsafe { str::from_utf8_unchecked(self.inner.resolve(sym)) }
     }
 }

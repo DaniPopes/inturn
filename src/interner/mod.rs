@@ -2,7 +2,7 @@ mod bytes;
 pub use bytes::BytesInterner;
 
 mod str;
-// pub use self::str::Interner;
+pub use self::str::Interner;
 
 #[cfg(test)]
 mod tests {
@@ -10,13 +10,16 @@ mod tests {
     use crate::Symbol;
 
     const fn _assert_send_sync<T: Send + Sync>() {}
-    const _: () = _assert_send_sync::<BytesInterner>();
+    const _: () = {
+        _assert_send_sync::<Interner>();
+        _assert_send_sync::<BytesInterner>();
+    };
 
     macro_rules! basic {
         ($intern:ident) => {
             #[allow(unused_mut)]
-            let mut interner = BytesInterner::new();
-            assert!(interner.map.is_empty());
+            let mut interner = Interner::new();
+            assert!(interner.inner.map.is_empty());
 
             let hello = interner.$intern("hello");
             assert_eq!(hello.get(), 0);
@@ -39,7 +42,7 @@ mod tests {
             assert_eq!(interner.len(), 2);
 
             #[allow(unused_mut)]
-            let mut interner2 = BytesInterner::new();
+            let mut interner2 = Interner::new();
             let prefill = &["hello", "world"];
             for &s in prefill {
                 interner2.$intern(s);
@@ -71,7 +74,7 @@ mod tests {
 
     #[test]
     fn mt() {
-        let interner = BytesInterner::new();
+        let interner = Interner::new();
         let symbols_per_thread = if cfg!(miri) { 5 } else { 5000 };
         let n_threads = if cfg!(miri) {
             2
@@ -110,7 +113,7 @@ mod tests {
             fn write(&mut self, _bytes: &[u8]) {}
         }
 
-        let interner = BytesInterner::<Symbol, _>::with_hasher(std::hash::BuildHasherDefault::<
+        let interner = Interner::<Symbol, _>::with_hasher(std::hash::BuildHasherDefault::<
             MyBadHasher,
         >::default());
         let hello = interner.intern("hello");

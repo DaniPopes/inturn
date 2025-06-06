@@ -1,19 +1,18 @@
+use crate::{lock_free_stack::LFStack, InternerSymbol, Symbol};
 use bumpalo::Bump;
 use dashmap::DashMap;
 use hashbrown::hash_table;
 use std::{collections::hash_map::RandomState, hash::BuildHasher};
 use thread_local::ThreadLocal;
 
-use crate::{lock_free_stack::LFStack, InternerSymbol, Symbol};
-
 /// `str -> Symbol` interner.
 /// The hash is also stored to avoid double hashing.
 ///
 /// This uses `NoHasher` because we want to store the `hash_builder`
 /// outside of the lock, and to avoid hashing twice on insertion.
-type Map<S> = DashMap<MapKey, S, NoHasherBuilder>;
-type MapKey = (u64, &'static str);
-type RawMapKey<S> = (MapKey, S);
+pub(crate) type Map<S> = DashMap<MapKey, S, NoHasherBuilder>;
+pub(crate) type MapKey = (u64, &'static str);
+pub(crate) type RawMapKey<S> = (MapKey, S);
 
 // TODO: Use a lock-free arena.
 type Arena = ThreadLocal<Bump>;
@@ -21,21 +20,21 @@ type Arena = ThreadLocal<Bump>;
 /// String interner.
 ///
 /// See the [module docs][self] for more details.
-pub struct Interner<S = Symbol, H = RandomState> {
-    map: Map<S>,
+pub struct BytesInterner<S = Symbol, H = RandomState> {
+    pub(crate) map: Map<S>,
     strs: LFStack<&'static str>,
     arena: Box<Arena>,
     hash_builder: H,
 }
 
-impl Default for Interner {
+impl Default for BytesInterner {
     #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Interner<Symbol, RandomState> {
+impl BytesInterner<Symbol, RandomState> {
     /// Creates a new, empty `Interner` with the default symbol and hasher.
     #[inline]
     pub fn new() -> Self {
@@ -49,7 +48,7 @@ impl Interner<Symbol, RandomState> {
     }
 }
 
-impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
+impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     /// Creates a new `Interner` with the given custom hasher.
     #[inline]
     pub fn with_hasher(hash_builder: H) -> Self {
@@ -223,9 +222,9 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     }
 }
 
-type NoHasherBuilder = std::hash::BuildHasherDefault<NoHasher>;
+pub(crate) type NoHasherBuilder = std::hash::BuildHasherDefault<NoHasher>;
 
-enum NoHasher {}
+pub(crate) enum NoHasher {}
 impl Default for NoHasher {
     #[inline]
     fn default() -> Self {
@@ -287,122 +286,4 @@ fn alloc(arena: &Arena, s: &str) -> &'static str {
 fn no_alloc(_: &Arena, s: &str) -> &'static str {
     // SAFETY: `s` outlives `arena`, so we don't need to allocate it. See above.
     unsafe { std::mem::transmute::<&str, &'static str>(s) }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const fn _assert_send_sync<T: Send + Sync>() {}
-    const _: () = _assert_send_sync::<Interner>();
-
-    macro_rules! basic {
-        ($intern:ident) => {
-            #[allow(unused_mut)]
-            let mut interner = Interner::new();
-            assert!(interner.map.is_empty());
-
-            let hello = interner.$intern("hello");
-            assert_eq!(hello.get(), 0);
-            assert_eq!(interner.resolve(hello), "hello");
-            assert_eq!(interner.len(), 1);
-
-            let world = interner.$intern("world");
-            assert_eq!(world.get(), 1);
-            assert_eq!(interner.resolve(world), "world");
-            assert_eq!(interner.len(), 2);
-
-            let hello2 = interner.$intern("hello");
-            assert_eq!(hello, hello2);
-            let hello3 = interner.$intern("hello");
-            assert_eq!(hello, hello3);
-
-            let world2 = interner.$intern("world");
-            assert_eq!(world, world2);
-
-            assert_eq!(interner.len(), 2);
-
-            #[allow(unused_mut)]
-            let mut interner2 = Interner::new();
-            let prefill = &["hello", "world"];
-            for &s in prefill {
-                interner2.$intern(s);
-            }
-            assert_eq!(interner2.resolve(hello), "hello");
-            assert_eq!(interner2.resolve(world), "world");
-            assert_eq!(interner2.$intern("hello"), hello);
-            assert_eq!(interner2.$intern("world"), world);
-            assert_eq!(interner2.len(), 2);
-        };
-    }
-
-    #[test]
-    fn basic() {
-        basic!(intern);
-    }
-    #[test]
-    fn basic_mut() {
-        basic!(intern_mut);
-    }
-    #[test]
-    fn basic_static() {
-        basic!(intern_static);
-    }
-    #[test]
-    fn basic_mut_static() {
-        basic!(intern_mut_static);
-    }
-
-    #[test]
-    fn mt() {
-        let interner = Interner::new();
-        let symbols_per_thread = if cfg!(miri) { 5 } else { 5000 };
-        let n_threads = if cfg!(miri) {
-            2
-        } else {
-            std::thread::available_parallelism().map_or(4, usize::from)
-        };
-
-        std::thread::scope(|scope| {
-            let intern_many = |salt: usize| {
-                let intern_one = |i: usize| {
-                    let s = format!("hello {salt} {i}");
-                    let sym = interner.intern(&s);
-                    assert_eq!(interner.resolve(sym), s);
-                };
-                for i in 0..symbols_per_thread {
-                    intern_one(i);
-                    intern_one(i);
-                }
-            };
-            for i in 0..n_threads {
-                scope.spawn(move || intern_many(i));
-            }
-        });
-
-        assert_eq!(interner.len(), n_threads * symbols_per_thread);
-    }
-
-    #[test]
-    fn hash_collision() {
-        #[derive(Default)]
-        struct MyBadHasher;
-        impl std::hash::Hasher for MyBadHasher {
-            fn finish(&self) -> u64 {
-                4 // Chosen by fair dice roll.
-            }
-            fn write(&mut self, _bytes: &[u8]) {}
-        }
-
-        let interner = Interner::<Symbol, _>::with_hasher(std::hash::BuildHasherDefault::<
-            MyBadHasher,
-        >::default());
-        let hello = interner.intern("hello");
-        let world = interner.intern("world");
-        assert_eq!(hello.get(), 0);
-        assert_eq!(world.get(), 1);
-        assert_eq!(interner.resolve(hello), "hello");
-        assert_eq!(interner.resolve(world), "world");
-        assert_eq!(interner.len(), 2);
-    }
 }

@@ -3,7 +3,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod interner;
-pub use interner::Interner;
+pub use interner::BytesInterner;
 
 mod symbol;
 pub use symbol::{InternerSymbol, Symbol};

@@ -200,11 +200,11 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
         let shard_idx = self.map.determine_shard(hash as usize);
         let shard = &*self.map.shards()[shard_idx];
 
-        if let Some((_, sym)) = shard.read().find(hash, mk_eq(s)) {
-            return *sym;
+        if let Some((_, v)) = cvt(&shard.read()).find(hash, mk_eq(s)) {
+            return *v.get();
         }
 
-        insert(&self.strs, &self.arena, s, hash, &mut shard.write(), alloc)
+        insert(&self.strs, &self.arena, s, hash, cvt_mut(&mut shard.write()), alloc)
     }
 
     #[inline]
@@ -213,7 +213,7 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
         let shard_idx = self.map.determine_shard(hash as usize);
         let shard = &mut *self.map.shards_mut()[shard_idx];
 
-        insert(&self.strs, &self.arena, s, hash, shard.get_mut(), alloc)
+        insert(&self.strs, &self.arena, s, hash, cvt_mut(shard.get_mut()), alloc)
     }
 
     #[inline]
@@ -252,19 +252,19 @@ fn insert<S: InternerSymbol>(
     arena: &Arena,
     s: &[u8],
     hash: u64,
-    shard: &mut hash_table::HashTable<RawMapKey<S>>,
+    shard: &mut hash_table::HashTable<RawMapKey<dashmap::SharedValue<S>>>,
     alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
 ) -> S {
     match shard.entry(hash, mk_eq(s), hasher) {
         hash_table::Entry::Occupied(e) => {
             // TODO: cold path
-            e.get().1
+            *e.get().1.get()
         }
         hash_table::Entry::Vacant(e) => {
             let s = alloc(arena, s);
             let i = strs.push(s);
             let new_sym = S::from_usize(i);
-            e.insert(((hash, s), new_sym));
+            e.insert(((hash, s), dashmap::SharedValue::new(new_sym)));
             new_sym
         }
     }
@@ -292,4 +292,17 @@ fn alloc(arena: &Arena, s: &[u8]) -> &'static [u8] {
 fn no_alloc(_: &Arena, s: &[u8]) -> &'static [u8] {
     // SAFETY: `s` outlives `arena`, so we don't need to allocate it. See above.
     unsafe { std::mem::transmute::<&[u8], &'static [u8]>(s) }
+}
+
+// SAFETY: `HashTable` is a thin wrapper around `RawTable`. This is not guaranteed but idc.
+#[inline]
+fn cvt<S>(old: &hashbrown::raw::RawTable<RawMapKey<S>>) -> &hash_table::HashTable<RawMapKey<S>> {
+    unsafe { std::mem::transmute(old) }
+}
+
+#[inline]
+fn cvt_mut<S>(
+    old: &mut hashbrown::raw::RawTable<RawMapKey<S>>,
+) -> &mut hash_table::HashTable<RawMapKey<S>> {
+    unsafe { std::mem::transmute(old) }
 }

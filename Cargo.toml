@@ -15,11 +15,10 @@ exclude = [".github/", "benches/", "fuzz/", "tests/"]
 
 [dependencies]
 bumpalo = { version = "3", default-features = false }
-dashmap = { version = "7.0.0-rc2", default-features = false, features = [
-    "raw-api",
+dashmap = { version = "6.0", default-features = false, features = ["raw-api"] }
+hashbrown = { version = "0.14", default-features = false, features = [
     "inline-more",
 ] }
-hashbrown = { version = "0.15", default-features = false }
 thread_local = "1.1.8"
 
 [features]

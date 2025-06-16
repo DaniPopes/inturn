@@ -1,4 +1,5 @@
-use crate::{InternerSymbol, Symbol, lock_free_stack::LFStack};
+use crate::{InternerSymbol, Symbol};
+use boxcar::Vec as LFVec;
 use bumpalo::Bump;
 use dashmap::DashMap;
 use hashbrown::hash_table;
@@ -22,9 +23,9 @@ type Arena = ThreadLocal<Bump>;
 /// See the [crate-level docs][crate] for more details.
 pub struct BytesInterner<S = Symbol, H = RandomState> {
     pub(crate) map: Map<S>,
-    strs: LFStack<&'static [u8]>,
-    arena: Box<Arena>,
     hash_builder: H,
+    strs: LFVec<&'static [u8]>,
+    arena: Arena,
 }
 
 impl Default for BytesInterner {
@@ -58,14 +59,14 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     /// Creates a new `Interner` with the given capacitiy and custom hasher.
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: H) -> Self {
         let map = Map::with_capacity_and_hasher(capacity, Default::default());
-        let strs = LFStack::with_capacity(capacity);
+        let strs = LFVec::with_capacity(capacity);
         Self { map, strs, arena: Default::default(), hash_builder }
     }
 
     /// Returns the number of unique strings in the interner.
     #[inline]
     pub fn len(&self) -> usize {
-        self.strs.len()
+        self.strs.count()
     }
 
     /// Returns `true` if the interner is empty.
@@ -248,7 +249,7 @@ impl std::hash::Hasher for NoHasher {
 
 #[inline]
 fn insert<S: InternerSymbol>(
-    strs: &LFStack<&'static [u8]>,
+    strs: &LFVec<&'static [u8]>,
     arena: &Arena,
     s: &[u8],
     hash: u64,

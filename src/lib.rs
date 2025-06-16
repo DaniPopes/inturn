@@ -7,5 +7,3 @@ pub use interner::{BytesInterner, Interner};
 
 mod symbol;
 pub use symbol::{InternerSymbol, Symbol};
-
-mod lock_free_stack;

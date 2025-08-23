@@ -6,7 +6,7 @@ use std::{collections::hash_map::RandomState, hash::BuildHasher};
 /// This is a thin wrapper around [`BytesInterner`] that uses `str` instead of `[u8]`.
 ///
 /// See the [crate-level docs][crate] for more details.
-pub struct Interner<S = Symbol, H = RandomState> {
+pub struct Interner<S = Symbol, H: BuildHasher = RandomState> {
     pub(crate) inner: BytesInterner<S, H>,
 }
 

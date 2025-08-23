@@ -1,19 +1,9 @@
 use crate::{InternerSymbol, Symbol};
 use boxcar::Vec as LFVec;
 use bumpalo::Bump;
-use dashmap::DashMap;
-use hashbrown::hash_table;
+use papaya::HashMap;
 use std::{collections::hash_map::RandomState, hash::BuildHasher};
 use thread_local::ThreadLocal;
-
-/// `[u8] -> Symbol` interner.
-/// The hash is also stored to avoid double hashing.
-///
-/// This uses `NoHasher` because we want to store the `hash_builder`
-/// outside of the lock, and to avoid hashing twice on insertion.
-pub(crate) type Map<S> = DashMap<MapKey, S, NoHasherBuilder>;
-pub(crate) type MapKey = (u64, &'static [u8]);
-pub(crate) type RawMapKey<S> = (MapKey, S);
 
 // TODO: Use a lock-free arena.
 type Arena = ThreadLocal<Bump>;
@@ -22,8 +12,7 @@ type Arena = ThreadLocal<Bump>;
 ///
 /// See the [crate-level docs][crate] for more details.
 pub struct BytesInterner<S = Symbol, H = RandomState> {
-    pub(crate) map: Map<S>,
-    hash_builder: H,
+    pub(crate) map: HashMap<&'static [u8], S, H>,
     strs: LFVec<&'static [u8]>,
     arena: Arena,
 }
@@ -58,9 +47,9 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
 
     /// Creates a new `Interner` with the given capacitiy and custom hasher.
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: H) -> Self {
-        let map = Map::with_capacity_and_hasher(capacity, Default::default());
+        let map = HashMap::with_capacity_and_hasher(capacity, hash_builder);
         let strs = LFVec::with_capacity(capacity);
-        Self { map, strs, arena: Default::default(), hash_builder }
+        Self { map, strs, arena: Default::default() }
     }
 
     /// Returns the number of unique strings in the interner.
@@ -202,85 +191,18 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
 
     #[inline]
     fn do_intern(&self, s: &[u8], alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8]) -> S {
-        let hash = self.hash(s);
-        let shard_idx = self.map.determine_shard(hash as usize);
-        let shard = &*self.map.shards()[shard_idx];
-
-        if let Some((_, v)) = cvt(&shard.read()).find(hash, mk_eq(s)) {
-            return *v.get();
+        let map = self.map.pin();
+        if let Some(v) = map.get(s) {
+            return *v;
         }
-
-        get_or_insert(&self.strs, &self.arena, s, hash, cvt_mut(&mut shard.write()), alloc)
+        let s = alloc(&self.arena, s);
+        *map.get_or_insert_with(s, || S::from_usize(self.strs.push(s)))
     }
 
     #[inline]
     fn do_intern_mut(&mut self, s: &[u8], alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8]) -> S {
-        let hash = self.hash(s);
-        let shard_idx = self.map.determine_shard(hash as usize);
-        let shard = &mut *self.map.shards_mut()[shard_idx];
-
-        get_or_insert(&self.strs, &self.arena, s, hash, cvt_mut(shard.get_mut()), alloc)
+        self.do_intern(s, alloc)
     }
-
-    #[inline]
-    fn hash(&self, s: &[u8]) -> u64 {
-        // We don't use `self.hash_builder.hash_one(s)` because we want to avoid hashing the length.
-        use std::hash::Hasher;
-        let mut h = self.hash_builder.build_hasher();
-        h.write(s);
-        h.finish()
-    }
-}
-
-pub(crate) type NoHasherBuilder = std::hash::BuildHasherDefault<NoHasher>;
-
-pub(crate) enum NoHasher {}
-impl Default for NoHasher {
-    #[inline]
-    fn default() -> Self {
-        unreachable!()
-    }
-}
-impl std::hash::Hasher for NoHasher {
-    #[inline]
-    fn finish(&self) -> u64 {
-        match *self {}
-    }
-    #[inline]
-    fn write(&mut self, _bytes: &[u8]) {
-        match *self {}
-    }
-}
-
-#[inline]
-fn get_or_insert<S: InternerSymbol>(
-    strs: &LFVec<&'static [u8]>,
-    arena: &Arena,
-    s: &[u8],
-    hash: u64,
-    shard: &mut hash_table::HashTable<RawMapKey<dashmap::SharedValue<S>>>,
-    alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
-) -> S {
-    match shard.entry(hash, mk_eq(s), hasher) {
-        hash_table::Entry::Occupied(e) => *e.get().1.get(),
-        hash_table::Entry::Vacant(e) => {
-            let s = alloc(arena, s);
-            let i = strs.push(s);
-            let new_sym = S::from_usize(i);
-            e.insert(((hash, s), dashmap::SharedValue::new(new_sym)));
-            new_sym
-        }
-    }
-}
-
-#[inline]
-fn hasher<S>(((hash, _), _): &RawMapKey<S>) -> u64 {
-    *hash
-}
-
-#[inline]
-fn mk_eq<S>(s: &[u8]) -> impl Fn(&RawMapKey<S>) -> bool + Copy + '_ {
-    move |((_, ss), _): &RawMapKey<S>| s == *ss
 }
 
 #[inline]
@@ -295,15 +217,4 @@ fn alloc(arena: &Arena, s: &[u8]) -> &'static [u8] {
 fn no_alloc(_: &Arena, s: &[u8]) -> &'static [u8] {
     // SAFETY: `s` outlives `arena`, so we don't need to allocate it. See above.
     unsafe { std::mem::transmute::<&[u8], &'static [u8]>(s) }
-}
-
-// SAFETY: `HashTable` is a thin wrapper around `RawTable`. This is not guaranteed but idc.
-#[inline]
-fn cvt<T>(old: &hashbrown::raw::RawTable<T>) -> &hash_table::HashTable<T> {
-    unsafe { std::mem::transmute(old) }
-}
-
-#[inline]
-fn cvt_mut<T>(old: &mut hashbrown::raw::RawTable<T>) -> &mut hash_table::HashTable<T> {
-    unsafe { std::mem::transmute(old) }
 }

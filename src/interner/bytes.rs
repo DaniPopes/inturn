@@ -206,7 +206,7 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
         s: &[u8],
         alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
     ) -> S {
-        self.do_intern_prehashed(self.hash(s), s, alloc)
+        self.do_intern_prehashed(self.hash(s), s, mk_eq(s), alloc)
     }
 
     #[inline]
@@ -216,7 +216,7 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
         alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
     ) -> S {
         let hash = self.hash(s);
-        self.do_intern_mut_prehashed(hash, s, alloc)
+        self.do_intern_mut_prehashed(hash, s, mk_eq(s), alloc)
     }
 
     #[inline]
@@ -224,16 +224,17 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
         &self,
         hash: u64,
         s: &[u8],
+        eq: impl Fn(&RawMapKey<dashmap::SharedValue<S>>) -> bool + Copy,
         alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
     ) -> S {
         let shard_idx = self.map.determine_shard(hash as usize);
         let shard = &*self.map.shards()[shard_idx];
 
-        if let Some((_, v)) = cvt(&shard.read()).find(hash, mk_eq(s)) {
+        if let Some((_, v)) = cvt(&shard.read()).find(hash, eq) {
             return *v.get();
         }
 
-        get_or_insert(&self.strs, &self.arena, s, hash, cvt_mut(&mut shard.write()), alloc)
+        get_or_insert(&self.strs, &self.arena, s, hash, cvt_mut(&mut shard.write()), eq, alloc)
     }
 
     #[inline]
@@ -241,12 +242,13 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
         &mut self,
         hash: u64,
         s: &[u8],
+        eq: impl Fn(&RawMapKey<dashmap::SharedValue<S>>) -> bool + Copy,
         alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
     ) -> S {
         let shard_idx = self.map.determine_shard(hash as usize);
         let shard = &mut *self.map.shards_mut()[shard_idx];
 
-        get_or_insert(&self.strs, &self.arena, s, hash, cvt_mut(shard.get_mut()), alloc)
+        get_or_insert(&self.strs, &self.arena, s, hash, cvt_mut(shard.get_mut()), eq, alloc)
     }
 
     #[inline]
@@ -291,9 +293,10 @@ fn get_or_insert<S: InternerSymbol>(
     s: &[u8],
     hash: u64,
     shard: &mut hash_table::HashTable<RawMapKey<dashmap::SharedValue<S>>>,
+    eq: impl Fn(&RawMapKey<dashmap::SharedValue<S>>) -> bool + Copy,
     alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
 ) -> S {
-    match shard.entry(hash, mk_eq(s), hasher) {
+    match shard.entry(hash, eq, hasher) {
         hash_table::Entry::Occupied(e) => *e.get().1.get(),
         hash_table::Entry::Vacant(e) => {
             let s = alloc(arena, s);

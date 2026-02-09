@@ -15,20 +15,17 @@ pub(crate) type Map<S> = DashMap<MapKey, S, NoHasherBuilder>;
 pub(crate) type MapKey = (u64, &'static [u8]);
 pub(crate) type RawMapKey<S> = (MapKey, S);
 
+// TODO: Use a lock-free arena.
+pub(crate) type Arena = ThreadLocal<Bump>;
+
 /// Byte string interner.
 ///
-/// `MIN_ALIGN` controls the minimum alignment of all allocations made by the internal arena.
-/// This is delegated to [`bumpalo::Bump`]'s `MIN_ALIGN` parameter.
-/// By default it is `1`, which is suitable for byte and string interning.
-/// Use a higher value when interning types with stricter alignment requirements (e.g. via
-/// [`CopyInterner`](crate::CopyInterner)).
-///
 /// See the [crate-level docs][crate] for more details.
-pub struct BytesInterner<S = Symbol, H = RandomState, const MIN_ALIGN: usize = 1> {
+pub struct BytesInterner<S = Symbol, H = RandomState> {
     pub(crate) map: Map<S>,
     hash_builder: H,
     strs: LFVec<&'static [u8]>,
-    arena: ThreadLocal<Bump<MIN_ALIGN>>,
+    arena: Arena,
 }
 
 impl Default for BytesInterner {
@@ -39,27 +36,27 @@ impl Default for BytesInterner {
 }
 
 impl BytesInterner<Symbol, RandomState> {
-    /// Creates a new, empty `BytesInterner` with the default symbol and hasher.
+    /// Creates a new, empty `Interner` with the default symbol and hasher.
     #[inline]
     pub fn new() -> Self {
         Self::with_capacity(0)
     }
 
-    /// Creates a new `BytesInterner` with the given capacity and default symbol and hasher.
+    /// Creates a new `Interner` with the given capacity and default symbol and hasher.
     #[inline]
     pub fn with_capacity(capacity: usize) -> Self {
         Self::with_capacity_and_hasher(capacity, Default::default())
     }
 }
 
-impl<S: InternerSymbol, H: BuildHasher, const MIN_ALIGN: usize> BytesInterner<S, H, MIN_ALIGN> {
-    /// Creates a new `BytesInterner` with the given custom hasher.
+impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
+    /// Creates a new `Interner` with the given custom hasher.
     #[inline]
     pub fn with_hasher(hash_builder: H) -> Self {
         Self::with_capacity_and_hasher(0, hash_builder)
     }
 
-    /// Creates a new `BytesInterner` with the given capacitiy and custom hasher.
+    /// Creates a new `Interner` with the given capacitiy and custom hasher.
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: H) -> Self {
         let map = Map::with_capacity_and_hasher(capacity, Default::default());
         let strs = LFVec::with_capacity(capacity);
@@ -190,8 +187,8 @@ impl<S: InternerSymbol, H: BuildHasher, const MIN_ALIGN: usize> BytesInterner<S,
     ///
     /// # Panics
     ///
-    /// Panics if `Symbol` is out of bounds of this `BytesInterner`. You should only use `Symbol`s
-    /// created by this `BytesInterner`.
+    /// Panics if `Symbol` is out of bounds of this `Interner`. You should only use `Symbol`s
+    /// created by this `Interner`.
     #[inline]
     #[must_use]
     #[cfg_attr(debug_assertions, track_caller)]
@@ -207,7 +204,7 @@ impl<S: InternerSymbol, H: BuildHasher, const MIN_ALIGN: usize> BytesInterner<S,
     pub(crate) fn do_intern(
         &self,
         s: &[u8],
-        alloc: impl FnOnce(&ThreadLocal<Bump<MIN_ALIGN>>, &[u8]) -> &'static [u8],
+        alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
     ) -> S {
         let hash = self.hash(s);
         let shard_idx = self.map.determine_shard(hash as usize);
@@ -224,7 +221,7 @@ impl<S: InternerSymbol, H: BuildHasher, const MIN_ALIGN: usize> BytesInterner<S,
     pub(crate) fn do_intern_mut(
         &mut self,
         s: &[u8],
-        alloc: impl FnOnce(&ThreadLocal<Bump<MIN_ALIGN>>, &[u8]) -> &'static [u8],
+        alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
     ) -> S {
         let hash = self.hash(s);
         let shard_idx = self.map.determine_shard(hash as usize);
@@ -264,13 +261,13 @@ impl std::hash::Hasher for NoHasher {
 }
 
 #[inline]
-fn get_or_insert<S: InternerSymbol, const MIN_ALIGN: usize>(
+fn get_or_insert<S: InternerSymbol>(
     strs: &LFVec<&'static [u8]>,
-    arena: &ThreadLocal<Bump<MIN_ALIGN>>,
+    arena: &Arena,
     s: &[u8],
     hash: u64,
     shard: &mut hash_table::HashTable<RawMapKey<dashmap::SharedValue<S>>>,
-    alloc: impl FnOnce(&ThreadLocal<Bump<MIN_ALIGN>>, &[u8]) -> &'static [u8],
+    alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
 ) -> S {
     match shard.entry(hash, mk_eq(s), hasher) {
         hash_table::Entry::Occupied(e) => *e.get().1.get(),
@@ -295,7 +292,7 @@ fn mk_eq<S>(s: &[u8]) -> impl Fn(&RawMapKey<S>) -> bool + Copy + '_ {
 }
 
 #[inline]
-fn alloc<const MIN_ALIGN: usize>(arena: &ThreadLocal<Bump<MIN_ALIGN>>, s: &[u8]) -> &'static [u8] {
+fn alloc(arena: &Arena, s: &[u8]) -> &'static [u8] {
     // SAFETY: extends the lifetime of `&Arena` to `'static`. This is never exposed so it's ok.
     unsafe {
         std::mem::transmute::<&[u8], &'static [u8]>(arena.get_or_default().alloc_slice_copy(s))
@@ -303,7 +300,7 @@ fn alloc<const MIN_ALIGN: usize>(arena: &ThreadLocal<Bump<MIN_ALIGN>>, s: &[u8])
 }
 
 #[inline]
-fn no_alloc<const MIN_ALIGN: usize>(_: &ThreadLocal<Bump<MIN_ALIGN>>, s: &[u8]) -> &'static [u8] {
+fn no_alloc(_: &Arena, s: &[u8]) -> &'static [u8] {
     // SAFETY: `s` outlives `arena`, so we don't need to allocate it. See above.
     unsafe { std::mem::transmute::<&[u8], &'static [u8]>(s) }
 }

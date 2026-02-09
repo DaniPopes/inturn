@@ -1,6 +1,9 @@
 mod bytes;
 pub use bytes::BytesInterner;
 
+mod copy;
+pub use self::copy::CopyInterner;
+
 mod str;
 pub use self::str::Interner;
 
@@ -13,6 +16,7 @@ mod tests {
     const _: () = {
         _assert_send_sync::<Interner>();
         _assert_send_sync::<BytesInterner>();
+        _assert_send_sync::<CopyInterner<u64>>();
     };
 
     macro_rules! basic {

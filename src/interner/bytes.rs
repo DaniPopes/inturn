@@ -16,7 +16,7 @@ pub(crate) type MapKey = (u64, &'static [u8]);
 pub(crate) type RawMapKey<S> = (MapKey, S);
 
 // TODO: Use a lock-free arena.
-type Arena = ThreadLocal<Bump>;
+pub(crate) type Arena = ThreadLocal<Bump>;
 
 /// Byte string interner.
 ///
@@ -201,7 +201,11 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     }
 
     #[inline]
-    fn do_intern(&self, s: &[u8], alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8]) -> S {
+    pub(crate) fn do_intern(
+        &self,
+        s: &[u8],
+        alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
+    ) -> S {
         let hash = self.hash(s);
         let shard_idx = self.map.determine_shard(hash as usize);
         let shard = &*self.map.shards()[shard_idx];
@@ -214,7 +218,11 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     }
 
     #[inline]
-    fn do_intern_mut(&mut self, s: &[u8], alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8]) -> S {
+    pub(crate) fn do_intern_mut(
+        &mut self,
+        s: &[u8],
+        alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
+    ) -> S {
         let hash = self.hash(s);
         let shard_idx = self.map.determine_shard(hash as usize);
         let shard = &mut *self.map.shards_mut()[shard_idx];

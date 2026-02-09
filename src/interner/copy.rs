@@ -56,14 +56,16 @@ fn mk_eq<T: Copy + Eq, S>(value: &T) -> impl Fn(&RawMapKey<S>) -> bool + Copy + 
 
 fn alloc_aligned<T>(arena: &Arena, s: &[u8]) -> &'static [u8] {
     let bump = arena.get_or_default();
-    let layout =
-        std::alloc::Layout::from_size_align(s.len(), mem::align_of::<T>()).expect("invalid layout");
-    // SAFETY: Layout is valid, and we initialize the allocated memory immediately.
+    // SAFETY: `align_of::<T>()` is always a power of two, and `s.len() == size_of::<T>()` which
+    // when rounded up to the alignment cannot overflow.
+    let layout = unsafe {
+        std::alloc::Layout::from_size_align(s.len(), mem::align_of::<T>()).unwrap_unchecked()
+    };
+    // SAFETY: Extends the lifetime. The arena outlives all references; same justification as
+    // `BytesInterner::alloc`.
     unsafe {
         let ptr = bump.alloc_layout(layout).as_ptr();
         std::ptr::copy_nonoverlapping(s.as_ptr(), ptr, s.len());
-        // SAFETY: Extends the lifetime. The arena outlives all references; same justification as
-        // `BytesInterner::alloc`.
         std::mem::transmute::<&[u8], &'static [u8]>(std::slice::from_raw_parts(ptr, s.len()))
     }
 }

@@ -5,7 +5,7 @@
 [![docs.rs](https://img.shields.io/badge/docs.rs-inturn-66c2a5?style=for-the-badge&labelColor=555555&logo=docs.rs)](https://docs.rs/inturn)
 [![build status](https://img.shields.io/github/actions/workflow/status/danipopes/inturn/ci.yml?branch=master&style=for-the-badge)](https://github.com/danipopes/inturn/actions?query=branch%3Amaster)
 
-Efficient, performant, thread-safe bytes/string interning.
+Efficient, performant, thread-safe bytes/string/copy-type interning.
 
 This crate was designed to have a lock-free mapping of symbols back to their original string.
 
@@ -17,6 +17,15 @@ or `&'static str`/`&'static [u8]` without allocation.
 
 A `*_mut` variant of each API is provided which side-step any locks,
 for e.g. initializing the interner with a static set of strings to pre-intern.
+
+## Interners
+
+- [`Interner`]: String (`&str`) interner, a thin wrapper around `BytesInterner`.
+- [`BytesInterner`]: Byte slice (`&[u8]`) interner, the core implementation.
+- [`CopyInterner<T>`]: Interner for arbitrary `Copy` types, a thin wrapper around `BytesInterner`.
+
+All interners accept a `MIN_ALIGN` const generic parameter that controls the minimum alignment of
+arena allocations, delegated to [`bumpalo::Bump`]'s `MIN_ALIGN` parameter.
 
 ## Examples
 

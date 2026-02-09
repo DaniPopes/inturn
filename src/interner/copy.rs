@@ -1,17 +1,17 @@
 use crate::{BytesInterner, InternerSymbol, Symbol};
 use std::{collections::hash_map::RandomState, hash::BuildHasher, mem};
 
-use super::bytes::Arena;
-
 /// Copy type interner.
 ///
 /// This is a thin wrapper around [`BytesInterner`] that interns values of a [`Copy`] type `T`.
 ///
-/// Allocated values are aligned to `align_of::<T>()`.
+/// `MIN_ALIGN` controls the minimum alignment of all allocations made by the internal arena and
+/// should be set to `align_of::<T>()` for optimal performance. See [`BytesInterner`] for more
+/// details.
 ///
 /// See the [crate-level docs][crate] for more details.
-pub struct CopyInterner<T, S = Symbol, H = RandomState> {
-    inner: BytesInterner<S, H>,
+pub struct CopyInterner<T, S = Symbol, H = RandomState, const MIN_ALIGN: usize = 1> {
+    inner: BytesInterner<S, H, MIN_ALIGN>,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -40,21 +40,9 @@ fn as_bytes<T>(value: &T) -> &[u8] {
     unsafe { std::slice::from_raw_parts(value as *const T as *const u8, mem::size_of::<T>()) }
 }
 
-fn alloc_aligned<T>(arena: &Arena, s: &[u8]) -> &'static [u8] {
-    let bump = arena.get_or_default();
-    let layout =
-        std::alloc::Layout::from_size_align(s.len(), mem::align_of::<T>()).expect("invalid layout");
-    // SAFETY: Layout is valid, and we initialize the allocated memory immediately.
-    unsafe {
-        let ptr = bump.alloc_layout(layout).as_ptr();
-        std::ptr::copy_nonoverlapping(s.as_ptr(), ptr, s.len());
-        // SAFETY: Extends the lifetime. The arena outlives all references; same justification as
-        // `BytesInterner::alloc`.
-        std::mem::transmute::<&[u8], &'static [u8]>(std::slice::from_raw_parts(ptr, s.len()))
-    }
-}
-
-impl<T: Copy, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, H> {
+impl<T: Copy, S: InternerSymbol, H: BuildHasher, const MIN_ALIGN: usize>
+    CopyInterner<T, S, H, MIN_ALIGN>
+{
     /// Creates a new `CopyInterner` with the given custom hasher.
     #[inline]
     pub fn with_hasher(hash_builder: H) -> Self {
@@ -99,7 +87,7 @@ impl<T: Copy, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, H> {
     ///
     /// Allocates the value internally if it is not already interned.
     pub fn intern(&self, value: &T) -> S {
-        self.inner.do_intern(as_bytes(value), alloc_aligned::<T>)
+        self.inner.intern(as_bytes(value))
     }
 
     /// Interns a value, returning its unique `Symbol`.
@@ -108,7 +96,7 @@ impl<T: Copy, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, H> {
     ///
     /// By taking `&mut self`, this never acquires any locks.
     pub fn intern_mut(&mut self, value: &T) -> S {
-        self.inner.do_intern_mut(as_bytes(value), alloc_aligned::<T>)
+        self.inner.intern_mut(as_bytes(value))
     }
 
     /// Maps a `Symbol` to its value. This is a cheap, lock-free operation.
@@ -123,8 +111,14 @@ impl<T: Copy, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, H> {
     pub fn resolve(&self, sym: S) -> T {
         let bytes = self.inner.resolve(sym);
         debug_assert_eq!(bytes.len(), mem::size_of::<T>());
-        debug_assert_eq!(bytes.as_ptr() as usize % mem::align_of::<T>(), 0);
-        // SAFETY: The bytes are a valid representation of `T`, allocated with proper alignment.
-        unsafe { std::ptr::read(bytes.as_ptr().cast::<T>()) }
+        // SAFETY: The bytes are a valid representation of `T`. When `MIN_ALIGN >= align_of::<T>()`,
+        // the pointer is guaranteed to be aligned; otherwise we use an unaligned read.
+        unsafe {
+            if MIN_ALIGN >= mem::align_of::<T>() {
+                std::ptr::read(bytes.as_ptr().cast::<T>())
+            } else {
+                std::ptr::read_unaligned(bytes.as_ptr().cast::<T>())
+            }
+        }
     }
 }

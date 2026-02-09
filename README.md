@@ -5,18 +5,20 @@
 [![docs.rs](https://img.shields.io/badge/docs.rs-inturn-66c2a5?style=for-the-badge&labelColor=555555&logo=docs.rs)](https://docs.rs/inturn)
 [![build status](https://img.shields.io/github/actions/workflow/status/danipopes/inturn/ci.yml?branch=master&style=for-the-badge)](https://github.com/danipopes/inturn/actions?query=branch%3Amaster)
 
-Efficient, performant, thread-safe bytes/string interning.
+Efficient, performant, thread-safe interning for strings, bytes, and `Copy` types.
 
-This crate was designed to have a lock-free mapping of symbols back to their original string.
+This crate provides lock-free symbol resolution (mapping symbols back to values) and concurrent
+deduplication via `dashmap`.
 
-It currently uses `dashmap` for deduplicating strings,
-and a lock-free stack to map the string index (symbol) back to the string bytes.
+## Interners
 
-It supports interning any `&str`/`&[u8]` by allocating it internally in an efficient arena when encountered for the first time,
-or `&'static str`/`&'static [u8]` without allocation.
+- **`Interner`** — `str` interning. Thin wrapper around `BytesInterner`.
+- **`BytesInterner`** — `[u8]` interning. The core implementation.
+- **`CopyInterner<T>`** — Generic interning for any `T: Copy + Hash + Eq`. Uses `T`'s `Hash` and
+  `Eq` implementations for deduplication, with aligned arena allocation.
 
-A `*_mut` variant of each API is provided which side-step any locks,
-for e.g. initializing the interner with a static set of strings to pre-intern.
+All interners support `&'static` variants that avoid allocation, and `*_mut` variants that
+side-step locks for single-threaded initialization.
 
 ## Examples
 

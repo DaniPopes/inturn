@@ -128,4 +128,64 @@ mod tests {
         assert_eq!(interner.resolve(world), "world");
         assert_eq!(interner.len(), 2);
     }
+
+    /// A type where Hash and Eq only consider the `key` field, ignoring `ignored`.
+    /// This means two values with the same `key` but different `ignored` are equal
+    /// and hash the same, even though their byte representations differ.
+    #[derive(Clone, Copy, Debug)]
+    struct HashEqKey {
+        key: u32,
+        ignored: u32,
+    }
+
+    impl std::hash::Hash for HashEqKey {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            self.key.hash(state);
+        }
+    }
+
+    impl PartialEq for HashEqKey {
+        fn eq(&self, other: &Self) -> bool {
+            self.key == other.key
+        }
+    }
+
+    impl Eq for HashEqKey {}
+
+    #[test]
+    fn copy_uses_t_eq() {
+        let interner = CopyInterner::<HashEqKey>::new();
+
+        let a = HashEqKey { key: 1, ignored: 100 };
+        let b = HashEqKey { key: 1, ignored: 200 };
+        assert_ne!(a.ignored, b.ignored);
+
+        let sym_a = interner.intern(&a);
+        let sym_b = interner.intern(&b);
+        // T::Eq considers them equal, so they must get the same symbol.
+        assert_eq!(sym_a, sym_b);
+        assert_eq!(interner.len(), 1);
+
+        // The resolved value should be the first one interned.
+        let resolved = interner.resolve(sym_a);
+        assert_eq!(resolved.key, 1);
+        assert_eq!(resolved.ignored, 100);
+    }
+
+    #[test]
+    fn copy_uses_t_hash() {
+        let interner = CopyInterner::<HashEqKey>::new();
+
+        let a = HashEqKey { key: 1, ignored: 100 };
+        let b = HashEqKey { key: 2, ignored: 100 };
+
+        let sym_a = interner.intern(&a);
+        let sym_b = interner.intern(&b);
+        // Different keys, so T::Hash produces different hashes and they are distinct.
+        assert_ne!(sym_a, sym_b);
+        assert_eq!(interner.len(), 2);
+
+        assert_eq!(interner.resolve(sym_a).key, 1);
+        assert_eq!(interner.resolve(sym_b).key, 2);
+    }
 }

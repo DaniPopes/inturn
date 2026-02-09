@@ -20,14 +20,14 @@ pub struct CopyInterner<T, S = Symbol, H = RandomState> {
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<T: Copy + Hash> Default for CopyInterner<T> {
+impl<T: Copy + Hash + Eq> Default for CopyInterner<T> {
     #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Copy + Hash> CopyInterner<T, Symbol, RandomState> {
+impl<T: Copy + Hash + Eq> CopyInterner<T, Symbol, RandomState> {
     /// Creates a new, empty `CopyInterner` with the default symbol and hasher.
     #[inline]
     pub fn new() -> Self {
@@ -59,7 +59,7 @@ fn alloc_aligned<T>(arena: &Arena, s: &[u8]) -> &'static [u8] {
     }
 }
 
-impl<T: Copy + Hash, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, H> {
+impl<T: Copy + Hash + Eq, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, H> {
     /// Creates a new `CopyInterner` with the given custom hasher.
     #[inline]
     pub fn with_hasher(hash_builder: H) -> Self {

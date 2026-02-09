@@ -206,7 +206,26 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
         s: &[u8],
         alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
     ) -> S {
+        self.do_intern_prehashed(self.hash(s), s, alloc)
+    }
+
+    #[inline]
+    pub(crate) fn do_intern_mut(
+        &mut self,
+        s: &[u8],
+        alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
+    ) -> S {
         let hash = self.hash(s);
+        self.do_intern_mut_prehashed(hash, s, alloc)
+    }
+
+    #[inline]
+    pub(crate) fn do_intern_prehashed(
+        &self,
+        hash: u64,
+        s: &[u8],
+        alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
+    ) -> S {
         let shard_idx = self.map.determine_shard(hash as usize);
         let shard = &*self.map.shards()[shard_idx];
 
@@ -218,12 +237,12 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     }
 
     #[inline]
-    pub(crate) fn do_intern_mut(
+    pub(crate) fn do_intern_mut_prehashed(
         &mut self,
+        hash: u64,
         s: &[u8],
         alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
     ) -> S {
-        let hash = self.hash(s);
         let shard_idx = self.map.determine_shard(hash as usize);
         let shard = &mut *self.map.shards_mut()[shard_idx];
 
@@ -237,6 +256,11 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
         let mut h = self.hash_builder.build_hasher();
         h.write(s);
         h.finish()
+    }
+
+    #[inline]
+    pub(crate) fn hash_one<V: std::hash::Hash>(&self, value: &V) -> u64 {
+        self.hash_builder.hash_one(value)
     }
 }
 

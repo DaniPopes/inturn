@@ -1,5 +1,9 @@
 use crate::{BytesInterner, InternerSymbol, Symbol};
-use std::{collections::hash_map::RandomState, hash::BuildHasher, mem};
+use std::{
+    collections::hash_map::RandomState,
+    hash::{BuildHasher, Hash},
+    mem,
+};
 
 use super::bytes::Arena;
 
@@ -7,7 +11,8 @@ use super::bytes::Arena;
 ///
 /// This is a thin wrapper around [`BytesInterner`] that interns values of a [`Copy`] type `T`.
 ///
-/// Allocated values are aligned to `align_of::<T>()`.
+/// Values are hashed using `T`'s [`Hash`] implementation and compared by their byte
+/// representation. Allocated values are aligned to `align_of::<T>()`.
 ///
 /// See the [crate-level docs][crate] for more details.
 pub struct CopyInterner<T, S = Symbol, H = RandomState> {
@@ -15,14 +20,14 @@ pub struct CopyInterner<T, S = Symbol, H = RandomState> {
     _marker: std::marker::PhantomData<T>,
 }
 
-impl<T: Copy> Default for CopyInterner<T> {
+impl<T: Copy + Hash> Default for CopyInterner<T> {
     #[inline]
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Copy> CopyInterner<T, Symbol, RandomState> {
+impl<T: Copy + Hash> CopyInterner<T, Symbol, RandomState> {
     /// Creates a new, empty `CopyInterner` with the default symbol and hasher.
     #[inline]
     pub fn new() -> Self {
@@ -54,7 +59,7 @@ fn alloc_aligned<T>(arena: &Arena, s: &[u8]) -> &'static [u8] {
     }
 }
 
-impl<T: Copy, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, H> {
+impl<T: Copy + Hash, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, H> {
     /// Creates a new `CopyInterner` with the given custom hasher.
     #[inline]
     pub fn with_hasher(hash_builder: H) -> Self {
@@ -99,7 +104,8 @@ impl<T: Copy, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, H> {
     ///
     /// Allocates the value internally if it is not already interned.
     pub fn intern(&self, value: &T) -> S {
-        self.inner.do_intern(as_bytes(value), alloc_aligned::<T>)
+        let hash = self.inner.hash_one(value);
+        self.inner.do_intern_prehashed(hash, as_bytes(value), alloc_aligned::<T>)
     }
 
     /// Interns a value, returning its unique `Symbol`.
@@ -108,7 +114,8 @@ impl<T: Copy, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, H> {
     ///
     /// By taking `&mut self`, this never acquires any locks.
     pub fn intern_mut(&mut self, value: &T) -> S {
-        self.inner.do_intern_mut(as_bytes(value), alloc_aligned::<T>)
+        let hash = self.inner.hash_one(value);
+        self.inner.do_intern_mut_prehashed(hash, as_bytes(value), alloc_aligned::<T>)
     }
 
     /// Maps a `Symbol` to its value. This is a cheap, lock-free operation.

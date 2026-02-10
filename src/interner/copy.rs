@@ -188,7 +188,7 @@ fn get_or_insert<T: Copy, S: InternerSymbol>(
             // SAFETY: `boxcar::Vec` has stable addresses (bucket-based, never reallocates).
             // The vec outlives all references; same justification as `BytesInterner::alloc`.
             let static_ref =
-                unsafe { std::mem::transmute::<&T, &'static T>(values.get(i).unwrap()) };
+                unsafe { std::mem::transmute::<&T, &'static T>(values.get_unchecked(i)) };
             e.insert(((hash, static_ref), dashmap::SharedValue::new(new_sym)));
             new_sym
         }

@@ -1,22 +1,29 @@
-use super::bytes::{Arena, RawMapKey};
-use crate::{BytesInterner, InternerSymbol, Symbol};
+use super::bytes::{NoHasherBuilder, cvt, cvt_mut};
+use crate::{InternerSymbol, Symbol};
+use boxcar::Vec as LFVec;
+use dashmap::DashMap;
+use hashbrown::hash_table;
 use std::{
     collections::hash_map::RandomState,
     hash::{BuildHasher, Hash},
-    mem,
 };
+
+type Map<T, S> = DashMap<MapKey<T>, S, NoHasherBuilder>;
+type MapKey<T> = (u64, &'static T);
+type RawMapKey<T, S> = (MapKey<T>, S);
 
 /// Copy type interner.
 ///
-/// This is a thin wrapper around [`BytesInterner`] that interns values of a [`Copy`] type `T`.
+/// This interns values of a [`Copy`] type `T`, storing them directly without indirection.
 ///
 /// Values are hashed using `T`'s [`Hash`] implementation and compared using `T`'s [`Eq`]
-/// implementation. Allocated values are aligned to `align_of::<T>()`.
+/// implementation.
 ///
 /// See the [crate-level docs][crate] for more details.
-pub struct CopyInterner<T, S = Symbol, H = RandomState> {
-    inner: BytesInterner<S, H>,
-    _marker: std::marker::PhantomData<T>,
+pub struct CopyInterner<T: 'static, S = Symbol, H = RandomState> {
+    map: Map<T, S>,
+    hash_builder: H,
+    values: LFVec<T>,
 }
 
 impl<T: Copy + Hash + Eq> Default for CopyInterner<T> {
@@ -40,41 +47,6 @@ impl<T: Copy + Hash + Eq> CopyInterner<T, Symbol, RandomState> {
     }
 }
 
-fn as_bytes<T>(value: &T) -> &[u8] {
-    unsafe { std::slice::from_raw_parts(value as *const T as *const u8, mem::size_of::<T>()) }
-}
-
-unsafe fn from_bytes<T: Copy>(bytes: &[u8]) -> T {
-    debug_assert_eq!(bytes.len(), mem::size_of::<T>());
-    debug_assert_eq!(bytes.as_ptr() as usize % mem::align_of::<T>(), 0);
-    unsafe { std::ptr::read(bytes.as_ptr().cast::<T>()) }
-}
-
-fn mk_eq<T: Copy + Eq, S>(value: &T) -> impl Fn(&RawMapKey<S>) -> bool + Copy + '_ {
-    move |((_, ss), _): &RawMapKey<S>| *value == unsafe { from_bytes::<T>(ss) }
-}
-
-fn alloc_aligned<T>(arena: &Arena, s: &[u8]) -> &'static [u8] {
-    let bump = arena.get_or_default();
-    // SAFETY: `align_of::<T>()` is always a power of two, and `s.len() == size_of::<T>()` which
-    // when rounded up to the alignment cannot overflow.
-    let layout = unsafe {
-        std::alloc::Layout::from_size_align(s.len(), mem::align_of::<T>()).unwrap_unchecked()
-    };
-    // SAFETY: Extends the lifetime. The arena outlives all references; same justification as
-    // `BytesInterner::alloc`.
-    unsafe {
-        let ptr = bump.alloc_layout(layout).as_ptr();
-        std::ptr::copy_nonoverlapping(s.as_ptr(), ptr, s.len());
-        std::mem::transmute::<&[u8], &'static [u8]>(std::slice::from_raw_parts(ptr, s.len()))
-    }
-}
-
-fn no_alloc(_: &Arena, s: &[u8]) -> &'static [u8] {
-    // SAFETY: `s` outlives the arena, so we don't need to allocate it.
-    unsafe { std::mem::transmute::<&[u8], &'static [u8]>(s) }
-}
-
 impl<T: Copy + Hash + Eq, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, H> {
     /// Creates a new `CopyInterner` with the given custom hasher.
     #[inline]
@@ -85,15 +57,16 @@ impl<T: Copy + Hash + Eq, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, 
     /// Creates a new `CopyInterner` with the given capacity and custom hasher.
     pub fn with_capacity_and_hasher(capacity: usize, hash_builder: H) -> Self {
         Self {
-            inner: BytesInterner::with_capacity_and_hasher(capacity, hash_builder),
-            _marker: std::marker::PhantomData,
+            map: Map::with_capacity_and_hasher(capacity, Default::default()),
+            hash_builder,
+            values: LFVec::with_capacity(capacity),
         }
     }
 
     /// Returns the number of unique values in the interner.
     #[inline]
     pub fn len(&self) -> usize {
-        self.inner.len()
+        self.values.count()
     }
 
     /// Returns `true` if the interner is empty.
@@ -118,54 +91,36 @@ impl<T: Copy + Hash + Eq, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, 
 
     /// Interns a value, returning its unique `Symbol`.
     ///
-    /// Allocates the value internally if it is not already interned.
-    ///
-    /// If `value` outlives `self`, prefer using [`intern_static`](Self::intern_static), as it will
-    /// not allocate on the heap.
+    /// Stores the value internally if it is not already interned.
     pub fn intern(&self, value: &T) -> S {
-        let hash = self.inner.hash_one(value);
-        self.inner.do_intern_prehashed(hash, as_bytes(value), mk_eq(value), alloc_aligned::<T>)
+        let hash = self.hash_builder.hash_one(value);
+        let shard_idx = self.map.determine_shard(hash as usize);
+        let shard = &*self.map.shards()[shard_idx];
+
+        let eq = mk_eq(value);
+        if let Some((_, v)) = cvt(&shard.read()).find(hash, eq) {
+            return *v.get();
+        }
+
+        get_or_insert(&self.values, *value, hash, cvt_mut(&mut shard.write()), eq)
     }
 
     /// Interns a value, returning its unique `Symbol`.
     ///
-    /// Allocates the value internally if it is not already interned.
-    ///
-    /// If `value` outlives `self`, prefer using [`intern_mut_static`](Self::intern_mut_static), as
-    /// it will not allocate on the heap.
+    /// Stores the value internally if it is not already interned.
     ///
     /// By taking `&mut self`, this never acquires any locks.
     pub fn intern_mut(&mut self, value: &T) -> S {
-        let hash = self.inner.hash_one(value);
-        self.inner.do_intern_mut_prehashed(hash, as_bytes(value), mk_eq(value), alloc_aligned::<T>)
-    }
+        let hash = self.hash_builder.hash_one(value);
+        let shard_idx = self.map.determine_shard(hash as usize);
+        let shard = &mut *self.map.shards_mut()[shard_idx];
 
-    /// Interns a static value, returning its unique `Symbol`.
-    ///
-    /// Note that this only requires that `value` outlives `self`, which means we can avoid
-    /// allocating.
-    pub fn intern_static<'a, 'b: 'a>(&'a self, value: &'b T) -> S {
-        let hash = self.inner.hash_one(value);
-        self.inner.do_intern_prehashed(hash, as_bytes(value), mk_eq(value), no_alloc)
-    }
-
-    /// Interns a static value, returning its unique `Symbol`.
-    ///
-    /// Note that this only requires that `value` outlives `self`, which means we can avoid
-    /// allocating.
-    ///
-    /// By taking `&mut self`, this never acquires any locks.
-    pub fn intern_mut_static<'a, 'b: 'a>(&'a mut self, value: &'b T) -> S {
-        let hash = self.inner.hash_one(value);
-        self.inner.do_intern_mut_prehashed(hash, as_bytes(value), mk_eq(value), no_alloc)
+        get_or_insert(&self.values, *value, hash, cvt_mut(shard.get_mut()), mk_eq(value))
     }
 
     /// Interns multiple values.
     ///
-    /// Allocates the values internally if they are not already interned.
-    ///
-    /// If the values outlive `self`, prefer using [`intern_many_static`](Self::intern_many_static),
-    /// as it will not allocate on the heap.
+    /// Stores the values internally if they are not already interned.
     pub fn intern_many<'a>(&self, values: impl IntoIterator<Item = &'a T>)
     where
         T: 'a,
@@ -177,11 +132,7 @@ impl<T: Copy + Hash + Eq, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, 
 
     /// Interns multiple values.
     ///
-    /// Allocates the values internally if they are not already interned.
-    ///
-    /// If the values outlive `self`, prefer using
-    /// [`intern_many_mut_static`](Self::intern_many_mut_static), as it will not allocate on the
-    /// heap.
+    /// Stores the values internally if they are not already interned.
     ///
     /// By taking `&mut self`, this never acquires any locks.
     pub fn intern_many_mut<'a>(&mut self, values: impl IntoIterator<Item = &'a T>)
@@ -190,34 +141,6 @@ impl<T: Copy + Hash + Eq, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, 
     {
         for v in values {
             self.intern_mut(v);
-        }
-    }
-
-    /// Interns multiple static values.
-    ///
-    /// Note that this only requires that the values outlive `self`, which means we can avoid
-    /// allocating.
-    pub fn intern_many_static<'a, 'b: 'a>(&'a self, values: impl IntoIterator<Item = &'b T>)
-    where
-        T: 'b,
-    {
-        for v in values {
-            self.intern_static(v);
-        }
-    }
-
-    /// Interns multiple static values.
-    ///
-    /// Note that this only requires that the values outlive `self`, which means we can avoid
-    /// allocating.
-    ///
-    /// By taking `&mut self`, this never acquires any locks.
-    pub fn intern_many_mut_static<'a, 'b: 'a>(&'a mut self, values: impl IntoIterator<Item = &'b T>)
-    where
-        T: 'b,
-    {
-        for v in values {
-            self.intern_mut_static(v);
         }
     }
 
@@ -231,7 +154,43 @@ impl<T: Copy + Hash + Eq, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, 
     #[must_use]
     #[cfg_attr(debug_assertions, track_caller)]
     pub fn resolve(&self, sym: S) -> T {
-        // SAFETY: The bytes are a valid representation of `T`, allocated with proper alignment.
-        unsafe { from_bytes(self.inner.resolve(sym)) }
+        if cfg!(debug_assertions) {
+            *self.values.get(sym.to_usize()).expect("symbol out of bounds")
+        } else {
+            unsafe { *self.values.get_unchecked(sym.to_usize()) }
+        }
+    }
+}
+
+#[inline]
+fn mk_eq<'a, T: Copy + Eq, S>(value: &'a T) -> impl Fn(&RawMapKey<T, S>) -> bool + Copy + 'a {
+    move |((_, v), _): &RawMapKey<T, S>| *value == **v
+}
+
+#[inline]
+fn hasher<T, S>(((hash, _), _): &RawMapKey<T, S>) -> u64 {
+    *hash
+}
+
+#[inline]
+fn get_or_insert<T: Copy, S: InternerSymbol>(
+    values: &LFVec<T>,
+    value: T,
+    hash: u64,
+    shard: &mut hash_table::HashTable<RawMapKey<T, dashmap::SharedValue<S>>>,
+    eq: impl Fn(&RawMapKey<T, dashmap::SharedValue<S>>) -> bool + Copy,
+) -> S {
+    match shard.entry(hash, eq, hasher) {
+        hash_table::Entry::Occupied(e) => *e.get().1.get(),
+        hash_table::Entry::Vacant(e) => {
+            let i = values.push(value);
+            let new_sym = S::from_usize(i);
+            // SAFETY: `boxcar::Vec` has stable addresses (bucket-based, never reallocates).
+            // The vec outlives all references; same justification as `BytesInterner::alloc`.
+            let static_ref =
+                unsafe { std::mem::transmute::<&T, &'static T>(values.get(i).unwrap()) };
+            e.insert(((hash, static_ref), dashmap::SharedValue::new(new_sym)));
+            new_sym
+        }
     }
 }

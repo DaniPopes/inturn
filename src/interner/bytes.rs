@@ -259,11 +259,6 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
         h.write(s);
         h.finish()
     }
-
-    #[inline]
-    pub(crate) fn hash_one<V: std::hash::Hash>(&self, value: &V) -> u64 {
-        self.hash_builder.hash_one(value)
-    }
 }
 
 pub(crate) type NoHasherBuilder = std::hash::BuildHasherDefault<NoHasher>;
@@ -334,11 +329,11 @@ fn no_alloc(_: &Arena, s: &[u8]) -> &'static [u8] {
 
 // SAFETY: `HashTable` is a thin wrapper around `RawTable`. This is not guaranteed but idc.
 #[inline]
-fn cvt<T>(old: &hashbrown::raw::RawTable<T>) -> &hash_table::HashTable<T> {
+pub(crate) fn cvt<T>(old: &hashbrown::raw::RawTable<T>) -> &hash_table::HashTable<T> {
     unsafe { std::mem::transmute(old) }
 }
 
 #[inline]
-fn cvt_mut<T>(old: &mut hashbrown::raw::RawTable<T>) -> &mut hash_table::HashTable<T> {
+pub(crate) fn cvt_mut<T>(old: &mut hashbrown::raw::RawTable<T>) -> &mut hash_table::HashTable<T> {
     unsafe { std::mem::transmute(old) }
 }

@@ -162,6 +162,39 @@ impl<T: Copy + Hash + Eq, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, 
     }
 }
 
+#[inline]
+fn mk_eq<'a, T: Copy + Eq, S>(value: &'a T) -> impl Fn(&RawMapKey<T, S>) -> bool + Copy + 'a {
+    move |((_, v), _): &RawMapKey<T, S>| *value == **v
+}
+
+#[inline]
+fn hasher<T, S>(((hash, _), _): &RawMapKey<T, S>) -> u64 {
+    *hash
+}
+
+#[inline]
+fn get_or_insert<T: Copy, S: InternerSymbol>(
+    values: &LFVec<T>,
+    value: T,
+    hash: u64,
+    shard: &mut hash_table::HashTable<RawMapKey<T, dashmap::SharedValue<S>>>,
+    eq: impl Fn(&RawMapKey<T, dashmap::SharedValue<S>>) -> bool + Copy,
+) -> S {
+    match shard.entry(hash, eq, hasher) {
+        hash_table::Entry::Occupied(e) => *e.get().1.get(),
+        hash_table::Entry::Vacant(e) => {
+            let i = values.push(value);
+            let new_sym = S::from_usize(i);
+            // SAFETY: `boxcar::Vec` has stable addresses (bucket-based, never reallocates).
+            // The vec outlives all references; same justification as `BytesInterner::alloc`.
+            let static_ref =
+                unsafe { std::mem::transmute::<&T, &'static T>(values.get(i).unwrap()) };
+            e.insert(((hash, static_ref), dashmap::SharedValue::new(new_sym)));
+            new_sym
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,38 +376,5 @@ mod tests {
 
         assert_eq!(interner.resolve(sym_a).key, 1);
         assert_eq!(interner.resolve(sym_b).key, 2);
-    }
-}
-
-#[inline]
-fn mk_eq<'a, T: Copy + Eq, S>(value: &'a T) -> impl Fn(&RawMapKey<T, S>) -> bool + Copy + 'a {
-    move |((_, v), _): &RawMapKey<T, S>| *value == **v
-}
-
-#[inline]
-fn hasher<T, S>(((hash, _), _): &RawMapKey<T, S>) -> u64 {
-    *hash
-}
-
-#[inline]
-fn get_or_insert<T: Copy, S: InternerSymbol>(
-    values: &LFVec<T>,
-    value: T,
-    hash: u64,
-    shard: &mut hash_table::HashTable<RawMapKey<T, dashmap::SharedValue<S>>>,
-    eq: impl Fn(&RawMapKey<T, dashmap::SharedValue<S>>) -> bool + Copy,
-) -> S {
-    match shard.entry(hash, eq, hasher) {
-        hash_table::Entry::Occupied(e) => *e.get().1.get(),
-        hash_table::Entry::Vacant(e) => {
-            let i = values.push(value);
-            let new_sym = S::from_usize(i);
-            // SAFETY: `boxcar::Vec` has stable addresses (bucket-based, never reallocates).
-            // The vec outlives all references; same justification as `BytesInterner::alloc`.
-            let static_ref =
-                unsafe { std::mem::transmute::<&T, &'static T>(values.get(i).unwrap()) };
-            e.insert(((hash, static_ref), dashmap::SharedValue::new(new_sym)));
-            new_sym
-        }
     }
 }

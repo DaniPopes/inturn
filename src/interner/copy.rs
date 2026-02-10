@@ -79,7 +79,7 @@ impl<T: Copy + Hash + Eq, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, 
     ///
     /// Does not guarantee that it includes symbols added after the iterator was created.
     #[inline]
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = (S, T)> + Clone + '_ {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (S, &T)> + Clone + '_ {
         self.all_symbols().map(|s| (s, self.resolve(s)))
     }
 
@@ -153,11 +153,11 @@ impl<T: Copy + Hash + Eq, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, 
     #[inline]
     #[must_use]
     #[cfg_attr(debug_assertions, track_caller)]
-    pub fn resolve(&self, sym: S) -> T {
+    pub fn resolve(&self, sym: S) -> &T {
         if cfg!(debug_assertions) {
-            *self.values.get(sym.to_usize()).expect("symbol out of bounds")
+            self.values.get(sym.to_usize()).expect("symbol out of bounds")
         } else {
-            unsafe { *self.values.get_unchecked(sym.to_usize()) }
+            unsafe { self.values.get_unchecked(sym.to_usize()) }
         }
     }
 }
@@ -214,12 +214,12 @@ mod tests {
             let b: $T = $make(2);
             let sym_a = interner.$intern(&a);
             assert_eq!(sym_a.get(), 0);
-            assert_eq!(interner.resolve(sym_a), a);
+            assert_eq!(*interner.resolve(sym_a), a);
             assert_eq!(interner.len(), 1);
 
             let sym_b = interner.$intern(&b);
             assert_eq!(sym_b.get(), 1);
-            assert_eq!(interner.resolve(sym_b), b);
+            assert_eq!(*interner.resolve(sym_b), b);
             assert_eq!(interner.len(), 2);
 
             let sym_a2 = interner.$intern(&a);
@@ -274,7 +274,7 @@ mod tests {
                 let intern_one = |i: u64| {
                     let value = salt * symbols_per_thread + i;
                     let sym = interner.intern(&value);
-                    assert_eq!(interner.resolve(sym), value);
+                    assert_eq!(*interner.resolve(sym), value);
                 };
                 for i in 0..symbols_per_thread {
                     intern_one(i);
@@ -306,7 +306,7 @@ mod tests {
                     let mut value = [0u8; 64];
                     value[..8].copy_from_slice(&n.to_le_bytes());
                     let sym = interner.intern(&value);
-                    assert_eq!(interner.resolve(sym), value);
+                    assert_eq!(*interner.resolve(sym), value);
                 };
                 for i in 0..symbols_per_thread {
                     intern_one(i);
@@ -357,7 +357,7 @@ mod tests {
         assert_eq!(sym_a, sym_b);
         assert_eq!(interner.len(), 1);
 
-        let resolved = interner.resolve(sym_a);
+        let resolved = *interner.resolve(sym_a);
         assert_eq!(resolved.key, 1);
         assert_eq!(resolved.ignored, 100);
     }

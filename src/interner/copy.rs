@@ -162,6 +162,190 @@ impl<T: Copy + Hash + Eq, S: InternerSymbol, H: BuildHasher> CopyInterner<T, S, 
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const fn _assert_send_sync<T: Send + Sync>() {}
+    const _: () = {
+        _assert_send_sync::<CopyInterner<u64>>();
+        _assert_send_sync::<CopyInterner<[u8; 64]>>();
+    };
+
+    macro_rules! basic {
+        ($intern:ident, $T:ty, $make:expr) => {
+            #[allow(unused_mut)]
+            let mut interner = CopyInterner::<$T>::new();
+
+            let a: $T = $make(1);
+            let b: $T = $make(2);
+            let sym_a = interner.$intern(&a);
+            assert_eq!(sym_a.get(), 0);
+            assert_eq!(interner.resolve(sym_a), a);
+            assert_eq!(interner.len(), 1);
+
+            let sym_b = interner.$intern(&b);
+            assert_eq!(sym_b.get(), 1);
+            assert_eq!(interner.resolve(sym_b), b);
+            assert_eq!(interner.len(), 2);
+
+            let sym_a2 = interner.$intern(&a);
+            assert_eq!(sym_a, sym_a2);
+            let sym_a3 = interner.$intern(&a);
+            assert_eq!(sym_a, sym_a3);
+
+            let sym_b2 = interner.$intern(&b);
+            assert_eq!(sym_b, sym_b2);
+
+            assert_eq!(interner.len(), 2);
+        };
+    }
+
+    #[test]
+    fn basic_u64() {
+        basic!(intern, u64, |i: u64| i);
+    }
+    #[test]
+    fn basic_u64_mut() {
+        basic!(intern_mut, u64, |i: u64| i);
+    }
+    #[test]
+    fn basic_big() {
+        basic!(intern, [u8; 64], |i: u64| {
+            let mut v = [0u8; 64];
+            v[..8].copy_from_slice(&i.to_le_bytes());
+            v
+        });
+    }
+    #[test]
+    fn basic_big_mut() {
+        basic!(intern_mut, [u8; 64], |i: u64| {
+            let mut v = [0u8; 64];
+            v[..8].copy_from_slice(&i.to_le_bytes());
+            v
+        });
+    }
+
+    #[test]
+    fn mt_u64() {
+        let interner = CopyInterner::<u64>::new();
+        let symbols_per_thread: u64 = if cfg!(miri) { 5 } else { 5000 };
+        let n_threads = if cfg!(miri) {
+            2
+        } else {
+            std::thread::available_parallelism().map_or(4, usize::from)
+        };
+
+        std::thread::scope(|scope| {
+            let intern_many = |salt: u64| {
+                let intern_one = |i: u64| {
+                    let value = salt * symbols_per_thread + i;
+                    let sym = interner.intern(&value);
+                    assert_eq!(interner.resolve(sym), value);
+                };
+                for i in 0..symbols_per_thread {
+                    intern_one(i);
+                    intern_one(i);
+                }
+            };
+            for i in 0..n_threads {
+                scope.spawn(move || intern_many(i as u64));
+            }
+        });
+
+        assert_eq!(interner.len(), n_threads * symbols_per_thread as usize);
+    }
+
+    #[test]
+    fn mt_big() {
+        let interner = CopyInterner::<[u8; 64]>::new();
+        let symbols_per_thread: usize = if cfg!(miri) { 5 } else { 5000 };
+        let n_threads = if cfg!(miri) {
+            2
+        } else {
+            std::thread::available_parallelism().map_or(4, usize::from)
+        };
+
+        std::thread::scope(|scope| {
+            let intern_many = |salt: usize| {
+                let intern_one = |i: usize| {
+                    let n = (salt * symbols_per_thread + i) as u64;
+                    let mut value = [0u8; 64];
+                    value[..8].copy_from_slice(&n.to_le_bytes());
+                    let sym = interner.intern(&value);
+                    assert_eq!(interner.resolve(sym), value);
+                };
+                for i in 0..symbols_per_thread {
+                    intern_one(i);
+                    intern_one(i);
+                }
+            };
+            for i in 0..n_threads {
+                scope.spawn(move || intern_many(i));
+            }
+        });
+
+        assert_eq!(interner.len(), n_threads * symbols_per_thread);
+    }
+
+    /// A type where Hash and Eq only consider the `key` field, ignoring `ignored`.
+    /// This means two values with the same `key` but different `ignored` are equal
+    /// and hash the same, even though their byte representations differ.
+    #[derive(Clone, Copy, Debug)]
+    struct HashEqKey {
+        key: u32,
+        ignored: u32,
+    }
+
+    impl std::hash::Hash for HashEqKey {
+        fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+            self.key.hash(state);
+        }
+    }
+
+    impl PartialEq for HashEqKey {
+        fn eq(&self, other: &Self) -> bool {
+            self.key == other.key
+        }
+    }
+
+    impl Eq for HashEqKey {}
+
+    #[test]
+    fn uses_t_eq() {
+        let interner = CopyInterner::<HashEqKey>::new();
+
+        let a = HashEqKey { key: 1, ignored: 100 };
+        let b = HashEqKey { key: 1, ignored: 200 };
+        assert_ne!(a.ignored, b.ignored);
+
+        let sym_a = interner.intern(&a);
+        let sym_b = interner.intern(&b);
+        assert_eq!(sym_a, sym_b);
+        assert_eq!(interner.len(), 1);
+
+        let resolved = interner.resolve(sym_a);
+        assert_eq!(resolved.key, 1);
+        assert_eq!(resolved.ignored, 100);
+    }
+
+    #[test]
+    fn uses_t_hash() {
+        let interner = CopyInterner::<HashEqKey>::new();
+
+        let a = HashEqKey { key: 1, ignored: 100 };
+        let b = HashEqKey { key: 2, ignored: 100 };
+
+        let sym_a = interner.intern(&a);
+        let sym_b = interner.intern(&b);
+        assert_ne!(sym_a, sym_b);
+        assert_eq!(interner.len(), 2);
+
+        assert_eq!(interner.resolve(sym_a).key, 1);
+        assert_eq!(interner.resolve(sym_b).key, 2);
+    }
+}
+
 #[inline]
 fn mk_eq<'a, T: Copy + Eq, S>(value: &'a T) -> impl Fn(&RawMapKey<T, S>) -> bool + Copy + 'a {
     move |((_, v), _): &RawMapKey<T, S>| *value == **v

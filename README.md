@@ -14,11 +14,10 @@ deduplication via `dashmap`.
 
 - **`Interner`** — `str` interning. Thin wrapper around `BytesInterner`.
 - **`BytesInterner`** — `[u8]` interning. The core implementation.
-- **`CopyInterner<T>`** — Generic interning for any `T: Copy + Hash + Eq`. Uses `T`'s `Hash` and
-  `Eq` implementations for deduplication, with aligned arena allocation.
+- **`CopyInterner<T>`** — Generic interning for any `T: Copy + Hash + Eq`.
 
-All interners support `&'static` variants that avoid allocation, and `*_mut` variants that
-side-step locks for single-threaded initialization.
+`Interner` and `BytesInterner` support `&'static` variants that avoid allocation. All interners
+support `*_mut` variants that side-step locks for single-threaded initialization.
 
 ## Examples
 

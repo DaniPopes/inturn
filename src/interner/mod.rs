@@ -152,6 +152,122 @@ mod tests {
 
     impl Eq for HashEqKey {}
 
+    macro_rules! copy_basic {
+        ($intern:ident, $T:ty, $make:expr) => {
+            #[allow(unused_mut)]
+            let mut interner = CopyInterner::<$T>::new();
+
+            let a: $T = $make(1);
+            let b: $T = $make(2);
+            let sym_a = interner.$intern(&a);
+            assert_eq!(sym_a.get(), 0);
+            assert_eq!(interner.resolve(sym_a), a);
+            assert_eq!(interner.len(), 1);
+
+            let sym_b = interner.$intern(&b);
+            assert_eq!(sym_b.get(), 1);
+            assert_eq!(interner.resolve(sym_b), b);
+            assert_eq!(interner.len(), 2);
+
+            let sym_a2 = interner.$intern(&a);
+            assert_eq!(sym_a, sym_a2);
+            let sym_a3 = interner.$intern(&a);
+            assert_eq!(sym_a, sym_a3);
+
+            let sym_b2 = interner.$intern(&b);
+            assert_eq!(sym_b, sym_b2);
+
+            assert_eq!(interner.len(), 2);
+        };
+    }
+
+    #[test]
+    fn copy_basic_u64() {
+        copy_basic!(intern, u64, |i: u64| i);
+    }
+    #[test]
+    fn copy_basic_u64_mut() {
+        copy_basic!(intern_mut, u64, |i: u64| i);
+    }
+    #[test]
+    fn copy_basic_big() {
+        copy_basic!(intern, [u8; 64], |i: u64| {
+            let mut v = [0u8; 64];
+            v[..8].copy_from_slice(&i.to_le_bytes());
+            v
+        });
+    }
+    #[test]
+    fn copy_basic_big_mut() {
+        copy_basic!(intern_mut, [u8; 64], |i: u64| {
+            let mut v = [0u8; 64];
+            v[..8].copy_from_slice(&i.to_le_bytes());
+            v
+        });
+    }
+
+    #[test]
+    fn copy_mt_u64() {
+        let interner = CopyInterner::<u64>::new();
+        let symbols_per_thread: u64 = if cfg!(miri) { 5 } else { 5000 };
+        let n_threads = if cfg!(miri) {
+            2
+        } else {
+            std::thread::available_parallelism().map_or(4, usize::from)
+        };
+
+        std::thread::scope(|scope| {
+            let intern_many = |salt: u64| {
+                let intern_one = |i: u64| {
+                    let value = salt * symbols_per_thread + i;
+                    let sym = interner.intern(&value);
+                    assert_eq!(interner.resolve(sym), value);
+                };
+                for i in 0..symbols_per_thread {
+                    intern_one(i);
+                    intern_one(i);
+                }
+            };
+            for i in 0..n_threads {
+                scope.spawn(move || intern_many(i as u64));
+            }
+        });
+
+        assert_eq!(interner.len(), n_threads * symbols_per_thread as usize);
+    }
+
+    #[test]
+    fn copy_mt_big() {
+        let interner = CopyInterner::<[u8; 64]>::new();
+        let symbols_per_thread: usize = if cfg!(miri) { 5 } else { 5000 };
+        let n_threads = if cfg!(miri) {
+            2
+        } else {
+            std::thread::available_parallelism().map_or(4, usize::from)
+        };
+
+        std::thread::scope(|scope| {
+            let intern_many = |salt: usize| {
+                let intern_one = |i: usize| {
+                    let n = (salt * symbols_per_thread + i) as u64;
+                    let mut value = [0u8; 64];
+                    value[..8].copy_from_slice(&n.to_le_bytes());
+                    let sym = interner.intern(&value);
+                    assert_eq!(interner.resolve(sym), value);
+                };
+                for i in 0..symbols_per_thread {
+                    intern_one(i);
+                    intern_one(i);
+                }
+            };
+            for i in 0..n_threads {
+                scope.spawn(move || intern_many(i));
+            }
+        });
+
+        assert_eq!(interner.len(), n_threads * symbols_per_thread);
+    }
+
     #[test]
     fn copy_uses_t_eq() {
         let interner = CopyInterner::<HashEqKey>::new();

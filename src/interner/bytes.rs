@@ -1,9 +1,9 @@
 use crate::{InternerSymbol, Symbol};
 use boxcar::Vec as LFVec;
-use bumpalo::Bump;
 use dashmap::DashMap;
 use hashbrown::hash_table;
 use std::{collections::hash_map::RandomState, hash::BuildHasher};
+use stumpalo::Arena;
 use thread_local::ThreadLocal;
 
 /// `[u8] -> Symbol` interner.
@@ -16,7 +16,25 @@ pub(crate) type MapKey = (u64, &'static [u8]);
 pub(crate) type RawMapKey<S> = (MapKey, S);
 
 // TODO: Use a lock-free arena.
-type Arena = ThreadLocal<Bump>;
+type Arenas = ThreadLocal<SendArena>;
+
+struct SendArena(Arena);
+
+// SAFETY: The arena is owned by `ThreadLocal`, allocation only happens through a thread-local
+// shared reference, and published allocations are immutable byte slices.
+unsafe impl Send for SendArena {}
+
+impl SendArena {
+    #[inline]
+    fn new() -> Self {
+        Self(Arena::new())
+    }
+
+    #[inline]
+    fn alloc_slice_copy<T: Copy>(&self, s: &[T]) -> &mut [T] {
+        self.0.alloc_slice_copy(s)
+    }
+}
 
 /// Byte string interner.
 ///
@@ -25,7 +43,7 @@ pub struct BytesInterner<S = Symbol, H = RandomState> {
     pub(crate) map: Map<S>,
     hash_builder: H,
     strs: LFVec<&'static [u8]>,
-    arena: Arena,
+    arena: Arenas,
 }
 
 impl Default for BytesInterner {
@@ -201,7 +219,7 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     }
 
     #[inline]
-    fn do_intern(&self, s: &[u8], alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8]) -> S {
+    fn do_intern(&self, s: &[u8], alloc: impl FnOnce(&Arenas, &[u8]) -> &'static [u8]) -> S {
         let hash = self.hash(s);
         let shard_idx = self.map.determine_shard(hash as usize);
         let shard = &*self.map.shards()[shard_idx];
@@ -214,7 +232,11 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     }
 
     #[inline]
-    fn do_intern_mut(&mut self, s: &[u8], alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8]) -> S {
+    fn do_intern_mut(
+        &mut self,
+        s: &[u8],
+        alloc: impl FnOnce(&Arenas, &[u8]) -> &'static [u8],
+    ) -> S {
         let hash = self.hash(s);
         let shard_idx = self.map.determine_shard(hash as usize);
         let shard = &mut *self.map.shards_mut()[shard_idx];
@@ -255,11 +277,11 @@ impl std::hash::Hasher for NoHasher {
 #[inline]
 fn get_or_insert<S: InternerSymbol>(
     strs: &LFVec<&'static [u8]>,
-    arena: &Arena,
+    arena: &Arenas,
     s: &[u8],
     hash: u64,
     shard: &mut hash_table::HashTable<RawMapKey<dashmap::SharedValue<S>>>,
-    alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
+    alloc: impl FnOnce(&Arenas, &[u8]) -> &'static [u8],
 ) -> S {
     match shard.entry(hash, mk_eq(s), hasher) {
         hash_table::Entry::Occupied(e) => *e.get().1.get(),
@@ -284,15 +306,17 @@ fn mk_eq<S>(s: &[u8]) -> impl Fn(&RawMapKey<S>) -> bool + Copy + '_ {
 }
 
 #[inline]
-fn alloc(arena: &Arena, s: &[u8]) -> &'static [u8] {
+fn alloc(arena: &Arenas, s: &[u8]) -> &'static [u8] {
     // SAFETY: extends the lifetime of `&Arena` to `'static`. This is never exposed so it's ok.
     unsafe {
-        std::mem::transmute::<&[u8], &'static [u8]>(arena.get_or_default().alloc_slice_copy(s))
+        std::mem::transmute::<&[u8], &'static [u8]>(
+            arena.get_or(SendArena::new).alloc_slice_copy(s),
+        )
     }
 }
 
 #[inline]
-fn no_alloc(_: &Arena, s: &[u8]) -> &'static [u8] {
+fn no_alloc(_: &Arenas, s: &[u8]) -> &'static [u8] {
     // SAFETY: `s` outlives `arena`, so we don't need to allocate it. See above.
     unsafe { std::mem::transmute::<&[u8], &'static [u8]>(s) }
 }

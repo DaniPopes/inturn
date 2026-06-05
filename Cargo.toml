@@ -15,9 +15,9 @@ exclude = [".github/", "benches/", "fuzz/", "tests/"]
 
 [dependencies]
 boxcar = "0.2"
-bumpalo = { version = "3", default-features = false }
 dashmap = { version = "6.0", default-features = false, features = ["raw-api"] }
 hashbrown = { version = "0.14", default-features = false, features = ["inline-more"] }
+stumpalo = { version = "0.1", default-features = false }
 thread_local = "1.1.8"
 
 [features]

@@ -16,25 +16,7 @@ pub(crate) type MapKey = (u64, &'static [u8]);
 pub(crate) type RawMapKey<S> = (MapKey, S);
 
 // TODO: Use a lock-free arena.
-type Arenas = ThreadLocal<SendArena>;
-
-struct SendArena(Arena);
-
-// SAFETY: The arena is owned by `ThreadLocal`, allocation only happens through a thread-local
-// shared reference, and published allocations are immutable byte slices.
-unsafe impl Send for SendArena {}
-
-impl SendArena {
-    #[inline]
-    fn new() -> Self {
-        Self(Arena::new())
-    }
-
-    #[inline]
-    fn alloc_slice_copy<T: Copy>(&self, s: &[T]) -> &mut [T] {
-        self.0.alloc_slice_copy(s)
-    }
-}
+type Arenas = ThreadLocal<Arena>;
 
 /// Byte string interner.
 ///
@@ -309,9 +291,7 @@ fn mk_eq<S>(s: &[u8]) -> impl Fn(&RawMapKey<S>) -> bool + Copy + '_ {
 fn alloc(arena: &Arenas, s: &[u8]) -> &'static [u8] {
     // SAFETY: extends the lifetime of `&Arena` to `'static`. This is never exposed so it's ok.
     unsafe {
-        std::mem::transmute::<&[u8], &'static [u8]>(
-            arena.get_or(SendArena::new).alloc_slice_copy(s),
-        )
+        std::mem::transmute::<&[u8], &'static [u8]>(arena.get_or(Arena::new).alloc_slice_copy(s))
     }
 }
 

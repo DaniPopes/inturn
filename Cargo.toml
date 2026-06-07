@@ -4,7 +4,7 @@ version = "0.1.2"
 authors = ["DaniPopes <57450786+DaniPopes@users.noreply.github.com>"]
 description = "Efficient, performant, thread-safe bytes/string interning"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 license = "MIT OR Apache-2.0"
 categories = ["caching"]
 keywords = ["symbol", "interning", "string-interning", "hash", "cache"]
@@ -15,9 +15,9 @@ exclude = [".github/", "benches/", "fuzz/", "tests/"]
 
 [dependencies]
 boxcar = "0.2"
-bumpalo = { version = "3", default-features = false }
 dashmap = { version = "6.0", default-features = false, features = ["raw-api"] }
 hashbrown = { version = "0.14", default-features = false, features = ["inline-more"] }
+stumpalo = { version = "0.1", default-features = false }
 thread_local = "1.1.8"
 
 [features]

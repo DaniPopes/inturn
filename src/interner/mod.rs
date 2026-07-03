@@ -1,3 +1,267 @@
+#[doc(hidden)]
+#[rustfmt::skip]
+macro_rules! impl_interner_api {
+    (
+        $ty:ident,
+        value = $value:ty,
+        mut_note = $mut_note:literal,
+        cheap_op = $cheap_op:literal
+    ) => {
+        impl Default for $ty {
+            #[inline]
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+
+        impl $ty<Symbol, RandomState> {
+            /// Creates a new, empty `Interner` with the default symbol and hasher.
+            #[inline]
+            pub fn new() -> Self {
+                Self::with_capacity(0)
+            }
+
+            /// Creates a new `Interner` with the given capacity and default symbol and hasher.
+            #[inline]
+            pub fn with_capacity(capacity: usize) -> Self {
+                Self::with_capacity_and_hasher(capacity, Default::default())
+            }
+        }
+
+        impl<S: InternerSymbol, H: BuildHasher> $ty<S, H> {
+            /// Creates a new `Interner` with the given custom hasher.
+            #[inline]
+            pub fn with_hasher(hash_builder: H) -> Self {
+                Self::with_capacity_and_hasher(0, hash_builder)
+            }
+
+            /// Creates a new `Interner` with the given capacitiy and custom hasher.
+            #[inline]
+            pub fn with_capacity_and_hasher(capacity: usize, hash_builder: H) -> Self {
+                Self::with_capacity_and_hasher_impl(capacity, hash_builder)
+            }
+
+            /// Returns the number of unique strings in the interner.
+            #[inline]
+            pub fn len(&self) -> usize {
+                self.len_impl()
+            }
+
+            /// Returns `true` if the interner is empty.
+            #[inline]
+            pub fn is_empty(&self) -> bool {
+                self.len() == 0
+            }
+
+            /// Returns an iterator over the interned strings and their corresponding `Symbol`s.
+            ///
+            /// Does not guarantee that it includes symbols added after the iterator was created.
+            #[inline]
+            pub fn iter(&self) -> impl ExactSizeIterator<Item = (S, &$value)> + Clone {
+                self.all_symbols().map(|s| (s, self.resolve(s)))
+            }
+
+            /// Returns an iterator over all symbols in the interner.
+            #[inline]
+            pub fn all_symbols(&self) -> impl ExactSizeIterator<Item = S> + Send + Sync + Clone {
+                (0..self.len()).map(S::from_usize)
+            }
+
+            /// Interns a string, returning its unique `Symbol`.
+            ///
+            /// Allocates the string internally if it is not already interned.
+            #[doc = concat!("If `s` is `&'static ", stringify!($value), "`, prefer using")]
+            /// [`intern_static`](Self::intern_static), as it will not allocate the string on the
+            /// heap.
+            #[inline]
+            pub fn intern(&self, s: &$value) -> S {
+                self.intern_impl(s)
+            }
+
+            /// Interns a string, returning its unique `Symbol`.
+            ///
+            /// Allocates the string internally if it is not already interned.
+            #[doc = concat!("If `s` is `&'static ", stringify!($value), "`, prefer using")]
+            /// [`intern_mut_static`](Self::intern_mut_static), as it will not allocate the string
+            /// on the heap.
+            #[doc = concat!("By taking `&mut self`, ", $mut_note)]
+            #[inline]
+            pub fn intern_mut(&mut self, s: &$value) -> S {
+                self.intern_mut_impl(s)
+            }
+
+            /// Interns a static string, returning its unique `Symbol`.
+            ///
+            /// The input must be `'static`, which means we can avoid allocating the string.
+            ///
+            /// For non-`'static` inputs that outlive this interner, see
+            /// [`intern_static_unchecked`](Self::intern_static_unchecked).
+            #[inline]
+            pub fn intern_static(&self, s: &'static $value) -> S {
+                self.intern_static_impl(s)
+            }
+
+            /// Interns a string without allocating, returning its unique `Symbol`.
+            ///
+            /// This is the unchecked version of [`intern_static`](Self::intern_static) for inputs
+            /// that are not typed as `'static`.
+            ///
+            /// # Safety
+            ///
+            /// The caller must ensure that `s` remains valid and unchanged until this interner is
+            /// dropped.
+            #[inline]
+            pub unsafe fn intern_static_unchecked(&self, s: &$value) -> S {
+                // SAFETY: This method has the same safety requirements as the helper.
+                unsafe { self.intern_static_unchecked_impl(s) }
+            }
+
+            /// Interns a static string, returning its unique `Symbol`.
+            ///
+            /// The input must be `'static`, which means we can avoid allocating the string.
+            ///
+            /// For non-`'static` inputs that outlive this interner, see
+            /// [`intern_mut_static_unchecked`](Self::intern_mut_static_unchecked).
+            #[doc = concat!("By taking `&mut self`, ", $mut_note)]
+            #[inline]
+            pub fn intern_mut_static(&mut self, s: &'static $value) -> S {
+                self.intern_mut_static_impl(s)
+            }
+
+            /// Interns a string without allocating, returning its unique `Symbol`.
+            ///
+            /// This is the unchecked version of [`intern_mut_static`](Self::intern_mut_static) for
+            /// inputs that are not typed as `'static`.
+            #[doc = concat!("By taking `&mut self`, ", $mut_note)]
+            ///
+            /// # Safety
+            ///
+            /// The caller must ensure that `s` remains valid and unchanged until this interner is
+            /// dropped.
+            #[inline]
+            pub unsafe fn intern_mut_static_unchecked(&mut self, s: &$value) -> S {
+                // SAFETY: This method has the same safety requirements as the helper.
+                unsafe { self.intern_mut_static_unchecked_impl(s) }
+            }
+
+            /// Interns multiple strings.
+            ///
+            /// Allocates the strings internally if they are not already interned.
+            #[doc = concat!("If the strings are `&'static ", stringify!($value), "`, prefer using")]
+            /// [`intern_many_static`](Self::intern_many_static), as it will not allocate the
+            /// strings on the heap.
+            #[inline]
+            pub fn intern_many<'a>(&self, strings: impl IntoIterator<Item = &'a $value>) {
+                for s in strings {
+                    self.intern_impl(s);
+                }
+            }
+
+            /// Interns multiple strings.
+            ///
+            /// Allocates the strings internally if they are not already interned.
+            #[doc = concat!("If the strings are `&'static ", stringify!($value), "`, prefer using")]
+            /// [`intern_many_mut_static`](Self::intern_many_mut_static), as it will not allocate
+            /// the strings on the heap.
+            #[doc = concat!("By taking `&mut self`, ", $mut_note)]
+            #[inline]
+            pub fn intern_many_mut<'a>(&mut self, strings: impl IntoIterator<Item = &'a $value>) {
+                for s in strings {
+                    self.intern_mut_impl(s);
+                }
+            }
+
+            /// Interns multiple static strings.
+            ///
+            /// The inputs must be `'static`, which means we can avoid allocating the strings.
+            #[inline]
+            pub fn intern_many_static(&self, strings: impl IntoIterator<Item = &'static $value>) {
+                for s in strings {
+                    self.intern_static_impl(s);
+                }
+            }
+
+            /// Interns multiple strings without allocating.
+            ///
+            /// This is the unchecked version of [`intern_many_static`](Self::intern_many_static)
+            /// for inputs that are not typed as `'static`.
+            ///
+            /// # Safety
+            ///
+            /// The caller must ensure that all inputs remain valid and unchanged until this
+            /// interner is dropped.
+            #[inline]
+            pub unsafe fn intern_many_static_unchecked<'a>(
+                &self,
+                strings: impl IntoIterator<Item = &'a $value>,
+            ) {
+                for s in strings {
+                    // SAFETY: This method has the same safety requirements as the helper.
+                    unsafe { self.intern_static_unchecked_impl(s) };
+                }
+            }
+
+            /// Interns multiple static strings.
+            ///
+            /// The inputs must be `'static`, which means we can avoid allocating the strings.
+            #[doc = concat!("By taking `&mut self`, ", $mut_note)]
+            #[inline]
+            pub fn intern_many_mut_static(
+                &mut self,
+                strings: impl IntoIterator<Item = &'static $value>,
+            ) {
+                for s in strings {
+                    self.intern_mut_static_impl(s);
+                }
+            }
+
+            /// Interns multiple strings without allocating.
+            ///
+            /// This is the unchecked version of
+            /// [`intern_many_mut_static`](Self::intern_many_mut_static) for inputs that are not
+            /// typed as `'static`.
+            #[doc = concat!("By taking `&mut self`, ", $mut_note)]
+            ///
+            /// # Safety
+            ///
+            /// The caller must ensure that all inputs remain valid and unchanged until this
+            /// interner is dropped.
+            #[inline]
+            pub unsafe fn intern_many_mut_static_unchecked<'a>(
+                &mut self,
+                strings: impl IntoIterator<Item = &'a $value>,
+            ) {
+                for s in strings {
+                    // SAFETY: This method has the same safety requirements as the helper.
+                    unsafe { self.intern_mut_static_unchecked_impl(s) };
+                }
+            }
+
+            #[doc = concat!("Maps a `Symbol` to its string. This is a ", $cheap_op, ".")]
+            ///
+            /// # Panics
+            ///
+            /// Panics if `Symbol` is out of bounds of this `Interner`. You should only use
+            /// `Symbol`s created by this `Interner`.
+            #[inline]
+            #[must_use]
+            #[cfg_attr(debug_assertions, track_caller)]
+            pub fn resolve(&self, sym: S) -> &$value {
+                self.resolve_impl(sym)
+            }
+
+            #[doc = concat!("Tries to map a `Symbol` to its string. This is a ", $cheap_op, ".")]
+            ///
+            /// Returns `None` if `Symbol` is out of bounds of this `Interner`.
+            #[inline]
+            #[must_use]
+            pub fn try_resolve(&self, sym: S) -> Option<&$value> {
+                self.try_resolve_impl(sym)
+            }
+        }
+    };
+}
+
 pub mod sync;
 pub mod unsync;
 

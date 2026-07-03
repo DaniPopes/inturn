@@ -1,9 +1,9 @@
 use crate::{InternerSymbol, Symbol};
 use boxcar::Vec as LFVec;
+use bumpalo::Bump;
 use dashmap::DashMap;
 use hashbrown::hash_table;
 use std::{collections::hash_map::RandomState, hash::BuildHasher};
-use stumpalo::Arena;
 use thread_local::ThreadLocal;
 
 /// `[u8] -> Symbol` interner.
@@ -16,7 +16,7 @@ pub(crate) type MapKey = (u64, &'static [u8]);
 pub(crate) type RawMapKey<S> = (MapKey, S);
 
 // TODO: Use a lock-free arena.
-type Arenas = ThreadLocal<Arena>;
+type Arenas = ThreadLocal<Bump>;
 
 /// Byte string interner.
 ///
@@ -289,9 +289,9 @@ fn mk_eq<S>(s: &[u8]) -> impl Fn(&RawMapKey<S>) -> bool + Copy + '_ {
 
 #[inline]
 fn alloc(arena: &Arenas, s: &[u8]) -> &'static [u8] {
-    // SAFETY: extends the lifetime of `&Arena` to `'static`. This is never exposed so it's ok.
+    // SAFETY: Extends the lifetime of `&Bump` to `'static`. This is never exposed so it's ok.
     unsafe {
-        std::mem::transmute::<&[u8], &'static [u8]>(arena.get_or(Arena::new).alloc_slice_copy(s))
+        std::mem::transmute::<&[u8], &'static [u8]>(arena.get_or_default().alloc_slice_copy(s))
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::{InternerSymbol, Symbol};
+use bumpalo::Bump;
 use hashbrown::hash_table;
 use std::{cell::UnsafeCell, collections::hash_map::RandomState, hash::BuildHasher};
-use stumpalo::Arena;
 
 /// `[u8] -> Symbol` interner.
 /// The hash is also stored to avoid double hashing.
@@ -16,7 +16,7 @@ pub struct BytesInterner<S = Symbol, H = RandomState> {
     pub(crate) map: UnsafeCell<Map<S>>,
     hash_builder: H,
     strs: UnsafeCell<Vec<&'static [u8]>>,
-    arena: Arena,
+    arena: Bump,
 }
 
 impl Default for BytesInterner {
@@ -55,7 +55,7 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
             map: UnsafeCell::new(map),
             hash_builder,
             strs: UnsafeCell::new(strs),
-            arena: Arena::new(),
+            arena: Bump::new(),
         }
     }
 
@@ -200,7 +200,7 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     }
 
     #[inline]
-    fn do_intern(&self, s: &[u8], alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8]) -> S {
+    fn do_intern(&self, s: &[u8], alloc: impl FnOnce(&Bump, &[u8]) -> &'static [u8]) -> S {
         let hash = self.hash(s);
         // SAFETY: This type is not `Sync`, so shared access cannot race across threads.
         let (map, strs) = unsafe { (&mut *self.map.get(), &mut *self.strs.get()) };
@@ -208,7 +208,7 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     }
 
     #[inline]
-    fn do_intern_mut(&mut self, s: &[u8], alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8]) -> S {
+    fn do_intern_mut(&mut self, s: &[u8], alloc: impl FnOnce(&Bump, &[u8]) -> &'static [u8]) -> S {
         let hash = self.hash(s);
         get_or_insert(self.strs.get_mut(), &self.arena, s, hash, self.map.get_mut(), alloc)
     }
@@ -226,11 +226,11 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
 #[inline]
 fn get_or_insert<S: InternerSymbol>(
     strs: &mut Vec<&'static [u8]>,
-    arena: &Arena,
+    arena: &Bump,
     s: &[u8],
     hash: u64,
     map: &mut Map<S>,
-    alloc: impl FnOnce(&Arena, &[u8]) -> &'static [u8],
+    alloc: impl FnOnce(&Bump, &[u8]) -> &'static [u8],
 ) -> S {
     match map.entry(hash, mk_eq(s), hasher) {
         hash_table::Entry::Occupied(e) => e.get().1,
@@ -256,13 +256,13 @@ fn mk_eq<S>(s: &[u8]) -> impl Fn(&RawMapKey<S>) -> bool + Copy + '_ {
 }
 
 #[inline]
-fn alloc(arena: &Arena, s: &[u8]) -> &'static [u8] {
-    // SAFETY: Extends the lifetime of `&Arena` to `'static`. This is never exposed so it's ok.
+fn alloc(arena: &Bump, s: &[u8]) -> &'static [u8] {
+    // SAFETY: Extends the lifetime of `&Bump` to `'static`. This is never exposed so it's ok.
     unsafe { std::mem::transmute::<&[u8], &'static [u8]>(arena.alloc_slice_copy(s)) }
 }
 
 #[inline]
-fn no_alloc(_: &Arena, s: &[u8]) -> &'static [u8] {
+fn no_alloc(_: &Bump, s: &[u8]) -> &'static [u8] {
     // SAFETY: `s` outlives `arena`, so we don't need to allocate it. See above.
     unsafe { std::mem::transmute::<&[u8], &'static [u8]>(s) }
 }

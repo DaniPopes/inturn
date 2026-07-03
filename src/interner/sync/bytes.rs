@@ -93,7 +93,7 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     ///
     /// Allocates the string internally if it is not already interned.
     ///
-    /// If `s` outlives `self`, like `&'static [u8]`, prefer using
+    /// If `s` is `&'static [u8]`, prefer using
     /// [`intern_static`](Self::intern_static), as it will not allocate the string on the heap.
     pub fn intern(&self, s: &[u8]) -> S {
         self.do_intern(s, alloc)
@@ -103,7 +103,7 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     ///
     /// Allocates the string internally if it is not already interned.
     ///
-    /// If `s` outlives `self`, like `&'static [u8]`, prefer using
+    /// If `s` is `&'static [u8]`, prefer using
     /// [`intern_mut_static`](Self::intern_mut_static), as it will not allocate the string on the
     /// heap.
     ///
@@ -114,19 +114,17 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
 
     /// Interns a static string, returning its unique `Symbol`.
     ///
-    /// Note that this only requires that `s` outlives `self`, which means we can avoid allocating
-    /// the string.
-    pub fn intern_static<'a, 'b: 'a>(&'a self, s: &'b [u8]) -> S {
+    /// The input must be `'static`, which means we can avoid allocating the string.
+    pub fn intern_static(&self, s: &'static [u8]) -> S {
         self.do_intern(s, no_alloc)
     }
 
     /// Interns a static string, returning its unique `Symbol`.
     ///
-    /// Note that this only requires that `s` outlives `self`, which means we can avoid allocating
-    /// the string.
+    /// The input must be `'static`, which means we can avoid allocating the string.
     ///
     /// By taking `&mut self`, this never acquires any locks.
-    pub fn intern_mut_static<'a, 'b: 'a>(&'a mut self, s: &'b [u8]) -> S {
+    pub fn intern_mut_static(&mut self, s: &'static [u8]) -> S {
         self.do_intern_mut(s, no_alloc)
     }
 
@@ -134,7 +132,7 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     ///
     /// Allocates the strings internally if they are not already interned.
     ///
-    /// If the strings outlive `self`, like `&'static [u8]`, prefer using
+    /// If the strings are `&'static [u8]`, prefer using
     /// [`intern_many_static`](Self::intern_many_static), as it will not allocate the strings on the
     /// heap.
     pub fn intern_many<'a>(&self, strings: impl IntoIterator<Item = &'a [u8]>) {
@@ -147,7 +145,7 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     ///
     /// Allocates the strings internally if they are not already interned.
     ///
-    /// If the strings outlive `self`, like `&'static [u8]`, prefer using
+    /// If the strings are `&'static [u8]`, prefer using
     /// [`intern_many_mut_static`](Self::intern_many_mut_static), as it will not allocate the
     /// strings on the heap.
     ///
@@ -160,9 +158,8 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
 
     /// Interns multiple static strings.
     ///
-    /// Note that this only requires that the strings outlive `self`, which means we can avoid
-    /// allocating the strings.
-    pub fn intern_many_static<'a, 'b: 'a>(&'a self, strings: impl IntoIterator<Item = &'b [u8]>) {
+    /// The inputs must be `'static`, which means we can avoid allocating the strings.
+    pub fn intern_many_static(&self, strings: impl IntoIterator<Item = &'static [u8]>) {
         for s in strings {
             self.intern_static(s);
         }
@@ -170,14 +167,10 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
 
     /// Interns multiple static strings.
     ///
-    /// Note that this only requires that the strings outlive `self`, which means we can avoid
-    /// allocating the strings.
+    /// The inputs must be `'static`, which means we can avoid allocating the strings.
     ///
     /// By taking `&mut self`, this never acquires any locks.
-    pub fn intern_many_mut_static<'a, 'b: 'a>(
-        &'a mut self,
-        strings: impl IntoIterator<Item = &'b [u8]>,
-    ) {
+    pub fn intern_many_mut_static(&mut self, strings: impl IntoIterator<Item = &'static [u8]>) {
         for s in strings {
             self.intern_mut_static(s);
         }
@@ -201,7 +194,11 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     }
 
     #[inline]
-    fn do_intern(&self, s: &[u8], alloc: impl FnOnce(&Arenas, &[u8]) -> &'static [u8]) -> S {
+    fn do_intern<'a>(
+        &self,
+        s: &'a [u8],
+        alloc: impl FnOnce(&Arenas, &'a [u8]) -> &'static [u8],
+    ) -> S {
         let hash = self.hash(s);
         let shard_idx = self.map.determine_shard(hash as usize);
         let shard = &*self.map.shards()[shard_idx];
@@ -214,10 +211,10 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     }
 
     #[inline]
-    fn do_intern_mut(
+    fn do_intern_mut<'a>(
         &mut self,
-        s: &[u8],
-        alloc: impl FnOnce(&Arenas, &[u8]) -> &'static [u8],
+        s: &'a [u8],
+        alloc: impl FnOnce(&Arenas, &'a [u8]) -> &'static [u8],
     ) -> S {
         let hash = self.hash(s);
         let shard_idx = self.map.determine_shard(hash as usize);
@@ -257,13 +254,13 @@ impl std::hash::Hasher for NoHasher {
 }
 
 #[inline]
-fn get_or_insert<S: InternerSymbol>(
+fn get_or_insert<'a, S: InternerSymbol>(
     strs: &LFVec<&'static [u8]>,
     arena: &Arenas,
-    s: &[u8],
+    s: &'a [u8],
     hash: u64,
     shard: &mut hash_table::HashTable<RawMapKey<dashmap::SharedValue<S>>>,
-    alloc: impl FnOnce(&Arenas, &[u8]) -> &'static [u8],
+    alloc: impl FnOnce(&Arenas, &'a [u8]) -> &'static [u8],
 ) -> S {
     match shard.entry(hash, mk_eq(s), hasher) {
         hash_table::Entry::Occupied(e) => *e.get().1.get(),
@@ -296,9 +293,8 @@ fn alloc(arena: &Arenas, s: &[u8]) -> &'static [u8] {
 }
 
 #[inline]
-fn no_alloc(_: &Arenas, s: &[u8]) -> &'static [u8] {
-    // SAFETY: `s` outlives `arena`, so we don't need to allocate it. See above.
-    unsafe { std::mem::transmute::<&[u8], &'static [u8]>(s) }
+fn no_alloc(_: &Arenas, s: &'static [u8]) -> &'static [u8] {
+    s
 }
 
 // SAFETY: `HashTable` is a thin wrapper around `RawTable`. This is not guaranteed but idc.

@@ -8,6 +8,13 @@ fn panic_invalid_index(id: usize) -> ! {
 }
 
 /// Trait for types that can be used as symbols in an `Interner`.
+///
+/// Implementations should be plain index wrappers. If `try_from_usize(i)` returns `Some(sym)`,
+/// then `sym.to_usize()` must return `i`, and converting from an index must be deterministic and
+/// side-effect free. In particular, conversion must not call back into an interner.
+///
+/// Symbols are scoped to the interner that created them. Passing manually created symbols, or
+/// symbols from another interner, to `resolve` is not supported and may panic.
 pub trait InternerSymbol: Sized + Copy + std::hash::Hash + Eq {
     /// Tries to create a new `Symbol` from a `usize`.
     fn try_from_usize(id: usize) -> Option<Self>;

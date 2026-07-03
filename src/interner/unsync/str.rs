@@ -74,7 +74,7 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     ///
     /// Allocates the string internally if it is not already interned.
     ///
-    /// If `s` outlives `self`, like `&'static str`, prefer using
+    /// If `s` is `&'static str`, prefer using
     /// [`intern_static`](Self::intern_static), as it will not allocate the string on the heap.
     pub fn intern(&self, s: &str) -> S {
         self.inner.intern(s.as_bytes())
@@ -84,7 +84,7 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     ///
     /// Allocates the string internally if it is not already interned.
     ///
-    /// If `s` outlives `self`, like `&'static str`, prefer using
+    /// If `s` is `&'static str`, prefer using
     /// [`intern_mut_static`](Self::intern_mut_static), as it will not allocate the string on the
     /// heap.
     ///
@@ -95,19 +95,17 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
 
     /// Interns a static string, returning its unique `Symbol`.
     ///
-    /// Note that this only requires that `s` outlives `self`, which means we can avoid allocating
-    /// the string.
-    pub fn intern_static<'a, 'b: 'a>(&'a self, s: &'b str) -> S {
+    /// The input must be `'static`, which means we can avoid allocating the string.
+    pub fn intern_static(&self, s: &'static str) -> S {
         self.inner.intern_static(s.as_bytes())
     }
 
     /// Interns a static string, returning its unique `Symbol`.
     ///
-    /// Note that this only requires that `s` outlives `self`, which means we can avoid allocating
-    /// the string.
+    /// The input must be `'static`, which means we can avoid allocating the string.
     ///
     /// By taking `&mut self`, this never uses shared interior mutability.
-    pub fn intern_mut_static<'a, 'b: 'a>(&'a mut self, s: &'b str) -> S {
+    pub fn intern_mut_static(&mut self, s: &'static str) -> S {
         self.inner.intern_mut_static(s.as_bytes())
     }
 
@@ -115,7 +113,7 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     ///
     /// Allocates the strings internally if they are not already interned.
     ///
-    /// If the strings outlive `self`, like `&'static str`, prefer using
+    /// If the strings are `&'static str`, prefer using
     /// [`intern_many_static`](Self::intern_many_static), as it will not allocate the strings on the
     /// heap.
     pub fn intern_many<'a>(&self, strings: impl IntoIterator<Item = &'a str>) {
@@ -126,7 +124,7 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     ///
     /// Allocates the strings internally if they are not already interned.
     ///
-    /// If the strings outlive `self`, like `&'static str`, prefer using
+    /// If the strings are `&'static str`, prefer using
     /// [`intern_many_mut_static`](Self::intern_many_mut_static), as it will not allocate the
     /// strings on the heap.
     ///
@@ -137,22 +135,17 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
 
     /// Interns multiple static strings.
     ///
-    /// Note that this only requires that the strings outlive `self`, which means we can avoid
-    /// allocating the strings.
-    pub fn intern_many_static<'a, 'b: 'a>(&'a self, strings: impl IntoIterator<Item = &'b str>) {
+    /// The inputs must be `'static`, which means we can avoid allocating the strings.
+    pub fn intern_many_static(&self, strings: impl IntoIterator<Item = &'static str>) {
         self.inner.intern_many_static(strings.into_iter().map(str::as_bytes));
     }
 
     /// Interns multiple static strings.
     ///
-    /// Note that this only requires that the strings outlive `self`, which means we can avoid
-    /// allocating the strings.
+    /// The inputs must be `'static`, which means we can avoid allocating the strings.
     ///
     /// By taking `&mut self`, this never uses shared interior mutability.
-    pub fn intern_many_mut_static<'a, 'b: 'a>(
-        &'a mut self,
-        strings: impl IntoIterator<Item = &'b str>,
-    ) {
+    pub fn intern_many_mut_static(&mut self, strings: impl IntoIterator<Item = &'static str>) {
         self.inner.intern_many_mut_static(strings.into_iter().map(str::as_bytes));
     }
 

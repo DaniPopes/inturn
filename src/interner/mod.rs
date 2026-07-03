@@ -55,6 +55,49 @@ mod tests {
         };
     }
 
+    macro_rules! basic_unchecked {
+        ($ty:ty, $intern:ident) => {
+            #[allow(unused_mut)]
+            let mut interner = <$ty>::new();
+            assert!(interner.is_empty());
+
+            // SAFETY: String literals are valid for the lifetime of the interner.
+            let hello = unsafe { interner.$intern("hello") };
+            assert_eq!(hello.get(), 0);
+            assert_eq!(interner.resolve(hello), "hello");
+            assert_eq!(interner.len(), 1);
+
+            // SAFETY: String literals are valid for the lifetime of the interner.
+            let world = unsafe { interner.$intern("world") };
+            assert_eq!(world.get(), 1);
+            assert_eq!(interner.resolve(world), "world");
+            assert_eq!(interner.len(), 2);
+
+            // SAFETY: String literals are valid for the lifetime of the interner.
+            let hello2 = unsafe { interner.$intern("hello") };
+            assert_eq!(hello, hello2);
+        };
+    }
+
+    macro_rules! basic_many_unchecked {
+        ($ty:ty, $intern:ident) => {
+            #[allow(unused_mut)]
+            let mut interner = <$ty>::new();
+            assert!(interner.is_empty());
+
+            // SAFETY: String literals are valid for the lifetime of the interner.
+            unsafe { interner.$intern(["hello", "world", "hello"]) };
+            assert_eq!(interner.len(), 2);
+
+            let hello = interner.intern("hello");
+            let world = interner.intern("world");
+            assert_eq!(hello.get(), 0);
+            assert_eq!(world.get(), 1);
+            assert_eq!(interner.resolve(hello), "hello");
+            assert_eq!(interner.resolve(world), "world");
+        };
+    }
+
     #[test]
     fn basic() {
         basic!(sync::Interner, intern);
@@ -72,6 +115,22 @@ mod tests {
         basic!(sync::Interner, intern_mut_static);
     }
     #[test]
+    fn basic_static_unchecked() {
+        basic_unchecked!(sync::Interner, intern_static_unchecked);
+    }
+    #[test]
+    fn basic_mut_static_unchecked() {
+        basic_unchecked!(sync::Interner, intern_mut_static_unchecked);
+    }
+    #[test]
+    fn basic_many_static_unchecked() {
+        basic_many_unchecked!(sync::Interner, intern_many_static_unchecked);
+    }
+    #[test]
+    fn basic_many_mut_static_unchecked() {
+        basic_many_unchecked!(sync::Interner, intern_many_mut_static_unchecked);
+    }
+    #[test]
     fn unsync_basic() {
         basic!(unsync::Interner, intern);
     }
@@ -86,6 +145,22 @@ mod tests {
     #[test]
     fn unsync_basic_mut_static() {
         basic!(unsync::Interner, intern_mut_static);
+    }
+    #[test]
+    fn unsync_basic_static_unchecked() {
+        basic_unchecked!(unsync::Interner, intern_static_unchecked);
+    }
+    #[test]
+    fn unsync_basic_mut_static_unchecked() {
+        basic_unchecked!(unsync::Interner, intern_mut_static_unchecked);
+    }
+    #[test]
+    fn unsync_basic_many_static_unchecked() {
+        basic_many_unchecked!(unsync::Interner, intern_many_static_unchecked);
+    }
+    #[test]
+    fn unsync_basic_many_mut_static_unchecked() {
+        basic_many_unchecked!(unsync::Interner, intern_many_mut_static_unchecked);
     }
 
     #[test]

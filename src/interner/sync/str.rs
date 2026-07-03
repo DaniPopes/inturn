@@ -96,17 +96,51 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     /// Interns a static string, returning its unique `Symbol`.
     ///
     /// The input must be `'static`, which means we can avoid allocating the string.
+    ///
+    /// For non-`'static` inputs that outlive this interner, see
+    /// [`intern_static_unchecked`](Self::intern_static_unchecked).
     pub fn intern_static(&self, s: &'static str) -> S {
         self.inner.intern_static(s.as_bytes())
+    }
+
+    /// Interns a string without allocating, returning its unique `Symbol`.
+    ///
+    /// This is the unchecked version of [`intern_static`](Self::intern_static) for inputs that are
+    /// not typed as `'static`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `s` remains valid and unchanged until this interner is dropped.
+    pub unsafe fn intern_static_unchecked(&self, s: &str) -> S {
+        // SAFETY: The caller upholds the same lifetime requirement for `s`.
+        unsafe { self.inner.intern_static_unchecked(s.as_bytes()) }
     }
 
     /// Interns a static string, returning its unique `Symbol`.
     ///
     /// The input must be `'static`, which means we can avoid allocating the string.
     ///
+    /// For non-`'static` inputs that outlive this interner, see
+    /// [`intern_mut_static_unchecked`](Self::intern_mut_static_unchecked).
+    ///
     /// By taking `&mut self`, this never acquires any locks.
     pub fn intern_mut_static(&mut self, s: &'static str) -> S {
         self.inner.intern_mut_static(s.as_bytes())
+    }
+
+    /// Interns a string without allocating, returning its unique `Symbol`.
+    ///
+    /// This is the unchecked version of [`intern_mut_static`](Self::intern_mut_static) for inputs
+    /// that are not typed as `'static`.
+    ///
+    /// By taking `&mut self`, this never acquires any locks.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `s` remains valid and unchanged until this interner is dropped.
+    pub unsafe fn intern_mut_static_unchecked(&mut self, s: &str) -> S {
+        // SAFETY: The caller upholds the same lifetime requirement for `s`.
+        unsafe { self.inner.intern_mut_static_unchecked(s.as_bytes()) }
     }
 
     /// Interns multiple strings.
@@ -140,6 +174,23 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
         self.inner.intern_many_static(strings.into_iter().map(str::as_bytes));
     }
 
+    /// Interns multiple strings without allocating.
+    ///
+    /// This is the unchecked version of [`intern_many_static`](Self::intern_many_static) for inputs
+    /// that are not typed as `'static`.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that all inputs remain valid and unchanged until this interner is
+    /// dropped.
+    pub unsafe fn intern_many_static_unchecked<'a>(
+        &self,
+        strings: impl IntoIterator<Item = &'a str>,
+    ) {
+        // SAFETY: The caller upholds the same lifetime requirement for all inputs.
+        unsafe { self.inner.intern_many_static_unchecked(strings.into_iter().map(str::as_bytes)) }
+    }
+
     /// Interns multiple static strings.
     ///
     /// The inputs must be `'static`, which means we can avoid allocating the strings.
@@ -147,6 +198,27 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
     /// By taking `&mut self`, this never acquires any locks.
     pub fn intern_many_mut_static(&mut self, strings: impl IntoIterator<Item = &'static str>) {
         self.inner.intern_many_mut_static(strings.into_iter().map(str::as_bytes));
+    }
+
+    /// Interns multiple strings without allocating.
+    ///
+    /// This is the unchecked version of [`intern_many_mut_static`](Self::intern_many_mut_static)
+    /// for inputs that are not typed as `'static`.
+    ///
+    /// By taking `&mut self`, this never acquires any locks.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that all inputs remain valid and unchanged until this interner is
+    /// dropped.
+    pub unsafe fn intern_many_mut_static_unchecked<'a>(
+        &mut self,
+        strings: impl IntoIterator<Item = &'a str>,
+    ) {
+        // SAFETY: The caller upholds the same lifetime requirement for all inputs.
+        unsafe {
+            self.inner.intern_many_mut_static_unchecked(strings.into_iter().map(str::as_bytes));
+        }
     }
 
     /// Maps a `Symbol` to its string. This is a cheap, lock-free operation.

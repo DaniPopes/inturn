@@ -23,7 +23,7 @@ for e.g. initializing the interner with a static set of strings to pre-intern.
 Basic `str` interning (the same API is available with `BytesInterner` for `[u8]`):
 
 ```rust
-use inturn::Interner;
+use inturn::sync::Interner;
 
 let interner = Interner::new();
 let hello = interner.intern("hello");

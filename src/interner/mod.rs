@@ -1,6 +1,4 @@
-mod sync;
-pub use sync::{BytesInterner, Interner};
-
+pub mod sync;
 pub mod unsync;
 
 #[cfg(test)]
@@ -11,8 +9,8 @@ mod tests {
     const fn _assert_send<T: Send>() {}
     const fn _assert_send_sync<T: Send + Sync>() {}
     const _: () = {
-        _assert_send_sync::<Interner>();
-        _assert_send_sync::<BytesInterner>();
+        _assert_send_sync::<sync::Interner>();
+        _assert_send_sync::<sync::BytesInterner>();
         _assert_send::<unsync::Interner>();
         _assert_send::<unsync::BytesInterner>();
     };
@@ -59,19 +57,19 @@ mod tests {
 
     #[test]
     fn basic() {
-        basic!(Interner, intern);
+        basic!(sync::Interner, intern);
     }
     #[test]
     fn basic_mut() {
-        basic!(Interner, intern_mut);
+        basic!(sync::Interner, intern_mut);
     }
     #[test]
     fn basic_static() {
-        basic!(Interner, intern_static);
+        basic!(sync::Interner, intern_static);
     }
     #[test]
     fn basic_mut_static() {
-        basic!(Interner, intern_mut_static);
+        basic!(sync::Interner, intern_mut_static);
     }
     #[test]
     fn unsync_basic() {
@@ -92,7 +90,7 @@ mod tests {
 
     #[test]
     fn mt() {
-        let interner = Interner::new();
+        let interner = sync::Interner::new();
         let symbols_per_thread = if cfg!(miri) { 5 } else { 5000 };
         let n_threads = if cfg!(miri) {
             2
@@ -131,7 +129,7 @@ mod tests {
             fn write(&mut self, _bytes: &[u8]) {}
         }
 
-        let interner = Interner::<Symbol, _>::with_hasher(std::hash::BuildHasherDefault::<
+        let interner = sync::Interner::<Symbol, _>::with_hasher(std::hash::BuildHasherDefault::<
             MyBadHasher,
         >::default());
         let hello = interner.intern("hello");

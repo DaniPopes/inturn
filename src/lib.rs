@@ -2,7 +2,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-mod interner;
+pub mod interner;
 pub use interner::{BytesInterner, Interner};
 
 mod symbol;

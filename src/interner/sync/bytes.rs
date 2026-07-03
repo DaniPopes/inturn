@@ -263,6 +263,15 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
         }
     }
 
+    /// Tries to map a `Symbol` to its string. This is a cheap, lock-free operation.
+    ///
+    /// Returns `None` if `Symbol` is out of bounds of this `Interner`.
+    #[inline]
+    #[must_use]
+    pub fn try_resolve(&self, sym: S) -> Option<&[u8]> {
+        self.strs.get(sym.to_usize()).copied()
+    }
+
     #[inline]
     fn do_intern<'a>(
         &self,

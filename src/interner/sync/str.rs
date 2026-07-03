@@ -234,4 +234,16 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
         // SAFETY: Only `str`s are interned.
         unsafe { std::str::from_utf8_unchecked(self.inner.resolve(sym)) }
     }
+
+    /// Tries to map a `Symbol` to its string. This is a cheap, lock-free operation.
+    ///
+    /// Returns `None` if `Symbol` is out of bounds of this `Interner`.
+    #[inline]
+    #[must_use]
+    pub fn try_resolve(&self, sym: S) -> Option<&str> {
+        self.inner.try_resolve(sym).map(|s| {
+            // SAFETY: Only `str`s are interned.
+            unsafe { std::str::from_utf8_unchecked(s) }
+        })
+    }
 }

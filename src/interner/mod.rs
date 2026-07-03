@@ -23,13 +23,16 @@ mod tests {
 
             let hello = interner.$intern("hello");
             assert_eq!(hello.get(), 0);
+            assert_eq!(interner.try_resolve(hello), Some("hello"));
             assert_eq!(interner.resolve(hello), "hello");
             assert_eq!(interner.len(), 1);
 
             let world = interner.$intern("world");
             assert_eq!(world.get(), 1);
+            assert_eq!(interner.try_resolve(world), Some("world"));
             assert_eq!(interner.resolve(world), "world");
             assert_eq!(interner.len(), 2);
+            assert_eq!(interner.try_resolve(Symbol::new(2)), None);
 
             let hello2 = interner.$intern("hello");
             assert_eq!(hello, hello2);
@@ -64,14 +67,17 @@ mod tests {
             // SAFETY: String literals are valid for the lifetime of the interner.
             let hello = unsafe { interner.$intern("hello") };
             assert_eq!(hello.get(), 0);
+            assert_eq!(interner.try_resolve(hello), Some("hello"));
             assert_eq!(interner.resolve(hello), "hello");
             assert_eq!(interner.len(), 1);
 
             // SAFETY: String literals are valid for the lifetime of the interner.
             let world = unsafe { interner.$intern("world") };
             assert_eq!(world.get(), 1);
+            assert_eq!(interner.try_resolve(world), Some("world"));
             assert_eq!(interner.resolve(world), "world");
             assert_eq!(interner.len(), 2);
+            assert_eq!(interner.try_resolve(Symbol::new(2)), None);
 
             // SAFETY: String literals are valid for the lifetime of the interner.
             let hello2 = unsafe { interner.$intern("hello") };
@@ -93,8 +99,11 @@ mod tests {
             let world = interner.intern("world");
             assert_eq!(hello.get(), 0);
             assert_eq!(world.get(), 1);
+            assert_eq!(interner.try_resolve(hello), Some("hello"));
+            assert_eq!(interner.try_resolve(world), Some("world"));
             assert_eq!(interner.resolve(hello), "hello");
             assert_eq!(interner.resolve(world), "world");
+            assert_eq!(interner.try_resolve(Symbol::new(2)), None);
         };
     }
 
@@ -161,6 +170,19 @@ mod tests {
     #[test]
     fn unsync_basic_many_mut_static_unchecked() {
         basic_many_unchecked!(unsync::Interner, intern_many_mut_static_unchecked);
+    }
+
+    #[test]
+    fn bytes_try_resolve() {
+        let interner = sync::BytesInterner::new();
+        let hello = interner.intern(b"hello");
+        assert_eq!(interner.try_resolve(hello), Some(&b"hello"[..]));
+        assert_eq!(interner.try_resolve(Symbol::new(1)), None);
+
+        let interner = unsync::BytesInterner::new();
+        let hello = interner.intern(b"hello");
+        assert_eq!(interner.try_resolve(hello), Some(&b"hello"[..]));
+        assert_eq!(interner.try_resolve(Symbol::new(1)), None);
     }
 
     #[test]

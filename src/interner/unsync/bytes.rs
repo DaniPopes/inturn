@@ -27,7 +27,6 @@ impl_interner_api!(
 );
 
 impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
-    #[doc(hidden)]
     fn with_capacity_and_hasher_impl(capacity: usize, hash_builder: H) -> Self {
         let map = Map::with_capacity(capacity);
         let strs = Vec::with_capacity(capacity);
@@ -39,50 +38,42 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
         }
     }
 
-    #[doc(hidden)]
     #[inline]
     fn len_impl(&self) -> usize {
         // SAFETY: This type is not `Sync`, and this method only reads the vector length.
         unsafe { (*self.strs.get()).len() }
     }
 
-    #[doc(hidden)]
     #[inline]
     fn intern_impl(&self, s: &[u8]) -> S {
         self.do_intern(s, alloc)
     }
 
-    #[doc(hidden)]
     #[inline]
     fn intern_mut_impl(&mut self, s: &[u8]) -> S {
         self.do_intern_mut(s, alloc)
     }
 
-    #[doc(hidden)]
     #[inline]
     fn intern_static_impl(&self, s: &'static [u8]) -> S {
         self.do_intern(s, no_alloc)
     }
 
-    #[doc(hidden)]
     #[inline]
     unsafe fn intern_static_unchecked_impl(&self, s: &[u8]) -> S {
         self.do_intern(s, no_alloc_unchecked)
     }
 
-    #[doc(hidden)]
     #[inline]
     fn intern_mut_static_impl(&mut self, s: &'static [u8]) -> S {
         self.do_intern_mut(s, no_alloc)
     }
 
-    #[doc(hidden)]
     #[inline]
     unsafe fn intern_mut_static_unchecked_impl(&mut self, s: &[u8]) -> S {
         self.do_intern_mut(s, no_alloc_unchecked)
     }
 
-    #[doc(hidden)]
     #[inline]
     #[cfg_attr(debug_assertions, track_caller)]
     fn resolve_impl(&self, sym: S) -> &[u8] {
@@ -95,7 +86,6 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
         }
     }
 
-    #[doc(hidden)]
     #[inline]
     fn try_resolve_impl(&self, sym: S) -> Option<&[u8]> {
         // SAFETY: This type is not `Sync`, and interned slices outlive the vector slot.

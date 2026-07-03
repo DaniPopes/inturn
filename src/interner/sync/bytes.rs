@@ -36,56 +36,47 @@ impl_interner_api!(
 );
 
 impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
-    #[doc(hidden)]
     fn with_capacity_and_hasher_impl(capacity: usize, hash_builder: H) -> Self {
         let map = Map::with_capacity_and_hasher(capacity, Default::default());
         let strs = LFVec::with_capacity(capacity);
         Self { map, strs, arena: Default::default(), hash_builder }
     }
 
-    #[doc(hidden)]
     #[inline]
     fn len_impl(&self) -> usize {
         self.strs.count()
     }
 
-    #[doc(hidden)]
     #[inline]
     fn intern_impl(&self, s: &[u8]) -> S {
         self.do_intern(s, alloc)
     }
 
-    #[doc(hidden)]
     #[inline]
     fn intern_mut_impl(&mut self, s: &[u8]) -> S {
         self.do_intern_mut(s, alloc)
     }
 
-    #[doc(hidden)]
     #[inline]
     fn intern_static_impl(&self, s: &'static [u8]) -> S {
         self.do_intern(s, no_alloc)
     }
 
-    #[doc(hidden)]
     #[inline]
     unsafe fn intern_static_unchecked_impl(&self, s: &[u8]) -> S {
         self.do_intern(s, no_alloc_unchecked)
     }
 
-    #[doc(hidden)]
     #[inline]
     fn intern_mut_static_impl(&mut self, s: &'static [u8]) -> S {
         self.do_intern_mut(s, no_alloc)
     }
 
-    #[doc(hidden)]
     #[inline]
     unsafe fn intern_mut_static_unchecked_impl(&mut self, s: &[u8]) -> S {
         self.do_intern_mut(s, no_alloc_unchecked)
     }
 
-    #[doc(hidden)]
     #[inline]
     #[cfg_attr(debug_assertions, track_caller)]
     fn resolve_impl(&self, sym: S) -> &[u8] {
@@ -96,7 +87,6 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
         }
     }
 
-    #[doc(hidden)]
     #[inline]
     fn try_resolve_impl(&self, sym: S) -> Option<&[u8]> {
         self.strs.get(sym.to_usize()).copied()

@@ -1,4 +1,3 @@
-#[doc(hidden)]
 #[rustfmt::skip]
 macro_rules! impl_interner_api {
     (

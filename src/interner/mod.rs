@@ -1,25 +1,27 @@
-mod bytes;
-pub use bytes::BytesInterner;
+mod sync;
+pub use sync::{BytesInterner, Interner};
 
-mod str;
-pub use self::str::Interner;
+pub mod unsync;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Symbol;
 
+    const fn _assert_send<T: Send>() {}
     const fn _assert_send_sync<T: Send + Sync>() {}
     const _: () = {
         _assert_send_sync::<Interner>();
         _assert_send_sync::<BytesInterner>();
+        _assert_send::<unsync::Interner>();
+        _assert_send::<unsync::BytesInterner>();
     };
 
     macro_rules! basic {
-        ($intern:ident) => {
+        ($ty:ty, $intern:ident) => {
             #[allow(unused_mut)]
-            let mut interner = Interner::new();
-            assert!(interner.inner.map.is_empty());
+            let mut interner = <$ty>::new();
+            assert!(interner.is_empty());
 
             let hello = interner.$intern("hello");
             assert_eq!(hello.get(), 0);
@@ -42,7 +44,7 @@ mod tests {
             assert_eq!(interner.len(), 2);
 
             #[allow(unused_mut)]
-            let mut interner2 = Interner::new();
+            let mut interner2 = <$ty>::new();
             let prefill = &["hello", "world"];
             for &s in prefill {
                 interner2.$intern(s);
@@ -57,19 +59,35 @@ mod tests {
 
     #[test]
     fn basic() {
-        basic!(intern);
+        basic!(Interner, intern);
     }
     #[test]
     fn basic_mut() {
-        basic!(intern_mut);
+        basic!(Interner, intern_mut);
     }
     #[test]
     fn basic_static() {
-        basic!(intern_static);
+        basic!(Interner, intern_static);
     }
     #[test]
     fn basic_mut_static() {
-        basic!(intern_mut_static);
+        basic!(Interner, intern_mut_static);
+    }
+    #[test]
+    fn unsync_basic() {
+        basic!(unsync::Interner, intern);
+    }
+    #[test]
+    fn unsync_basic_mut() {
+        basic!(unsync::Interner, intern_mut);
+    }
+    #[test]
+    fn unsync_basic_static() {
+        basic!(unsync::Interner, intern_static);
+    }
+    #[test]
+    fn unsync_basic_mut_static() {
+        basic!(unsync::Interner, intern_mut_static);
     }
 
     #[test]
@@ -114,6 +132,17 @@ mod tests {
         }
 
         let interner = Interner::<Symbol, _>::with_hasher(std::hash::BuildHasherDefault::<
+            MyBadHasher,
+        >::default());
+        let hello = interner.intern("hello");
+        let world = interner.intern("world");
+        assert_eq!(hello.get(), 0);
+        assert_eq!(world.get(), 1);
+        assert_eq!(interner.resolve(hello), "hello");
+        assert_eq!(interner.resolve(world), "world");
+        assert_eq!(interner.len(), 2);
+
+        let interner = unsync::Interner::<Symbol, _>::with_hasher(std::hash::BuildHasherDefault::<
             MyBadHasher,
         >::default());
         let hello = interner.intern("hello");

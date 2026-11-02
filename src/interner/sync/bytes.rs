@@ -2,22 +2,30 @@ use crate::{InternerSymbol, Symbol};
 use boxcar::Vec as LFVec;
 use bumpalo::Bump;
 use std::{
-    collections::hash_map::RandomState,
-    hash::BuildHasher,
-    marker::PhantomData,
-    ptr, slice,
-    sync::{
-        Mutex, PoisonError,
-        atomic::{AtomicPtr, AtomicU32, AtomicUsize, Ordering},
-    },
+    collections::hash_map::RandomState, hash::BuildHasher, marker::PhantomData, ptr, slice,
+    sync::PoisonError,
 };
 use thread_local::ThreadLocal;
 
+#[cfg(loom)]
+use loom::sync::{
+    Mutex,
+    atomic::{AtomicPtr, AtomicU32, AtomicUsize, Ordering},
+};
+#[cfg(not(loom))]
+use std::sync::{
+    Mutex,
+    atomic::{AtomicPtr, AtomicU32, AtomicUsize, Ordering},
+};
+
 /// Number of shards. Only insertions of new strings contend on a shard.
-const SHARDS: usize = 64;
+///
+/// Loom explores every interleaving, so it gets two shards and tables that grow on the second
+/// insertion.
+const SHARDS: usize = if cfg!(loom) { 2 } else { 64 };
 const SHARD_SHIFT: u32 = u64::BITS - SHARDS.ilog2();
 /// Smallest number of slots in a shard's table. Must be a power of two.
-const MIN_SLOTS: usize = 32;
+const MIN_SLOTS: usize = if cfg!(loom) { 2 } else { 32 };
 
 // TODO: Use a lock-free arena.
 type Arenas = ThreadLocal<Bump>;
@@ -242,6 +250,7 @@ impl Slot {
             return None;
         }
         let (ptr, len) = (self.ptr.load(Ordering::Relaxed), self.len.load(Ordering::Relaxed));
+        debug_assert!(!ptr.is_null(), "slot published before its key");
         // SAFETY: `store` wrote a `&'static [u8]`, and the `Acquire` load of `sym` made it visible.
         let key = unsafe { slice::from_raw_parts(ptr, len) };
         Some((sym, self.tag.load(Ordering::Relaxed), key))

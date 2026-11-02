@@ -1,6 +1,6 @@
 //! Loom models of concurrent interning.
 //!
-//! Run with `RUSTFLAGS="--cfg loom" cargo test --lib --release loom_tests`.
+//! Run with `RUSTFLAGS="--cfg loom" cargo test --lib loom_tests`.
 
 use super::Interner;
 use loom::{sync::Arc, thread};

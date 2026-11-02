@@ -479,6 +479,41 @@ mod tests {
     }
 
     #[test]
+    fn mt_shared() {
+        // Every thread interns every string, so lookups race with the insertions and table growth
+        // of other threads.
+        let strings = if cfg!(miri) { 2000 } else { 50_000 };
+        let n_threads = if cfg!(miri) { 2 } else { 8 };
+        let interner = sync::Interner::new();
+
+        let symbols = std::thread::scope(|scope| {
+            let handles = (0..n_threads)
+                .map(|t| {
+                    let interner = &interner;
+                    scope.spawn(move || {
+                        // Each thread starts at a different offset.
+                        (0..strings)
+                            .map(|i| {
+                                let s =
+                                    format!("hello {}", (i + t * strings / n_threads) % strings);
+                                let sym = interner.intern(&s);
+                                assert_eq!(interner.resolve(sym), s);
+                                (s, sym)
+                            })
+                            .collect::<std::collections::HashMap<_, _>>()
+                    })
+                })
+                .collect::<Vec<_>>();
+            handles.into_iter().map(|h| h.join().unwrap()).collect::<Vec<_>>()
+        });
+
+        assert_eq!(interner.len(), strings);
+        for other in &symbols[1..] {
+            assert_eq!(*other, symbols[0]);
+        }
+    }
+
+    #[test]
     fn hash_collision() {
         #[derive(Default)]
         struct MyBadHasher;

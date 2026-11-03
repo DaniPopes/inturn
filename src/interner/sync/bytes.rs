@@ -38,7 +38,7 @@ type Arenas = ThreadLocal<Bump>;
 ///
 /// Holds at most `u32::MAX - 1` strings; interning more panics.
 pub struct BytesInterner<S = Symbol, H = RandomState> {
-    shards: Box<[Shard]>,
+    shards: Box<[Shard; SHARDS]>,
     hash_builder: H,
     strs: LFVec<&'static [u8]>,
     arena: Arenas,
@@ -56,7 +56,10 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     fn with_capacity_and_hasher_impl(capacity: usize, hash_builder: H) -> Self {
         // Keep the load factor at or below 50%.
         let slots = (capacity / SHARDS * 2).next_power_of_two().max(MIN_SLOTS);
-        let shards = (0..SHARDS).map(|_| Shard::new(slots)).collect();
+        let Ok(shards) = (0..SHARDS).map(|_| Shard::new(slots)).collect::<Box<[_]>>().try_into()
+        else {
+            unreachable!()
+        };
         let strs = LFVec::with_capacity(capacity);
         Self { shards, strs, arena: Default::default(), hash_builder, _symbol: PhantomData }
     }

@@ -332,6 +332,15 @@ impl ShardState {
 }
 
 impl Table {
+    /// Returns the mask of slot indices.
+    #[inline]
+    fn mask(&self) -> usize {
+        // SAFETY: Tables are built by `Table::new` with a nonzero number of slots, and `grown`
+        // doubles it. Telling the compiler lets it drop the bounds check on every slot access.
+        unsafe { std::hint::assert_unchecked(!self.slots.is_empty()) };
+        self.slots.len() - 1
+    }
+
     fn new(slots: usize) -> Self {
         Self { slots: (0..slots).map(|_| Slot::default()).collect() }
     }
@@ -351,7 +360,7 @@ impl Table {
 
     #[inline]
     fn find(&self, tag: u32, key: &[u8]) -> Option<usize> {
-        let mask = self.slots.len() - 1;
+        let mask = self.mask();
         let mut i = tag as usize & mask;
         loop {
             let slot = &self.slots[i];
@@ -371,7 +380,7 @@ impl Table {
     /// Fills the first empty slot of the probe sequence. The caller holds the shard lock and
     /// guarantees that there is one.
     fn insert(&self, tag: u32, key: &'static [u8], sym: u32) {
-        let mask = self.slots.len() - 1;
+        let mask = self.mask();
         let mut i = tag as usize & mask;
         loop {
             let slot = &self.slots[i];

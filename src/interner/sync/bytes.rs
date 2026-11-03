@@ -24,6 +24,8 @@ use std::sync::{
 /// insertion.
 const SHARDS: usize = if cfg!(loom) { 2 } else { 64 };
 const SHARD_SHIFT: u32 = u64::BITS - SHARDS.ilog2();
+/// Odd multiplier that spreads all hash bits into the top bits used to select a shard.
+const SHARD_MIX: u64 = 0x9E37_79B9_7F4A_7C15;
 /// Smallest number of slots in a shard's table. Must be a power of two.
 const MIN_SLOTS: usize = if cfg!(loom) { 2 } else { 32 };
 
@@ -114,7 +116,7 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
         alloc: impl FnOnce(&Arenas, &'a [u8]) -> &'static [u8],
     ) -> S {
         let hash = self.hash(s);
-        let shard = &self.shards[(hash >> SHARD_SHIFT) as usize];
+        let shard = &self.shards[shard_index(hash)];
         let tag = hash as u32;
 
         if let Some(i) = shard.find(tag, s) {
@@ -133,7 +135,7 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     ) -> S {
         let hash = self.hash(s);
         let tag = hash as u32;
-        let Shard { cur, state } = &mut self.shards[(hash >> SHARD_SHIFT) as usize];
+        let Shard { cur, state } = &mut self.shards[shard_index(hash)];
         let state = state.get_mut().unwrap_or_else(PoisonError::into_inner);
         get_or_insert(&self.strs, &self.arena, s, tag, cur, state, alloc)
     }
@@ -170,6 +172,11 @@ fn get_or_insert<'a, S: InternerSymbol>(
 }
 
 #[inline]
+fn shard_index(hash: u64) -> usize {
+    (hash.wrapping_mul(SHARD_MIX) >> SHARD_SHIFT) as usize
+}
+
+#[inline]
 fn load_table(cur: &AtomicPtr<Table>) -> &Table {
     // SAFETY: `cur` points into a `Box` in the `ShardState::tables` of its shard. Tables are only
     // appended and never mutated through a unique reference until the shard is dropped, which
@@ -201,9 +208,10 @@ fn no_alloc_unchecked(_: &Arenas, s: &[u8]) -> &'static [u8] {
 /// Lookups only load from the table, so hits never write to shared memory. Insertions are
 /// serialized by `state`, and grow the table by publishing a new one.
 ///
-/// A hash is split three ways: the top bits select the shard, the low 32 bits are the `tag` stored
-/// in the slot, and the tag's low bits select the first probe. Storing the tag means that growing
-/// never rehashes a string.
+/// The shard is selected by the top bits of the hash times an odd constant, so every hash bit
+/// counts, even if the hasher only fills the low 32 bits. The low 32 bits of the hash are the `tag`
+/// stored in the slot, and the tag's low bits select the first probe. Storing the tag means that
+/// growing never rehashes a string.
 struct Shard {
     /// The latest table in `state.tables`.
     ///

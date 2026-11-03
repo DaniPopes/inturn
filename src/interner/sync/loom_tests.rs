@@ -22,7 +22,8 @@ fn same_string_gets_one_symbol() {
     });
 }
 
-/// Hashes a string to its first byte: every string lands in shard 0, with a distinct tag.
+/// Hashes a string to its first byte, so strings get distinct tags. `a`, `b` and `d` also share a
+/// shard.
 #[derive(Default)]
 struct FirstByte(u64);
 
@@ -44,12 +45,12 @@ fn growth_races_with_lookups() {
         ));
 
         let other = Arc::clone(&interner);
-        let handle = thread::spawn(move || ["a", "b", "c"].map(|s| other.intern(s)));
-        let syms = ["c", "a", "b"].map(|s| interner.intern(s));
+        let handle = thread::spawn(move || ["a", "b", "d"].map(|s| other.intern(s)));
+        let syms = ["d", "a", "b"].map(|s| interner.intern(s));
         let other_syms = handle.join().unwrap();
 
         assert_eq!(syms, [other_syms[2], other_syms[0], other_syms[1]]);
-        for (s, sym) in ["a", "b", "c"].into_iter().zip(other_syms) {
+        for (s, sym) in ["a", "b", "d"].into_iter().zip(other_syms) {
             assert_eq!(interner.resolve(sym), s);
             assert_eq!(interner.intern(s), sym);
         }

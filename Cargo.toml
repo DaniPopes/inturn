@@ -20,8 +20,15 @@ dashmap = { version = "6.0", default-features = false, features = ["raw-api"] }
 hashbrown = { version = "0.14", default-features = false, features = ["inline-more"] }
 thread_local = "1.1.8"
 
+[target.'cfg(loom)'.dependencies]
+boxcar = { version = "0.2", features = ["loom"] }
+loom = "0.7"
+
 [features]
 nightly = ["thread_local/nightly"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)"] }
 
 [profile.release]
 lto = "thin"

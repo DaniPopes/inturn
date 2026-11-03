@@ -177,11 +177,6 @@ fn get_or_insert<'a, S: InternerSymbol>(
 }
 
 #[inline]
-fn shard_index(hash: u64) -> usize {
-    (hash.wrapping_mul(SHARD_MIX) >> SHARD_SHIFT) as usize
-}
-
-#[inline]
 fn load_table(cur: &AtomicPtr<Table>) -> &Table {
     // SAFETY: `cur` points into a `Box` in the `ShardState::tables` of its shard. Tables are only
     // appended and never mutated through a unique reference until the shard is dropped, which
@@ -206,6 +201,11 @@ fn no_alloc(_: &Arenas, s: &'static [u8]) -> &'static [u8] {
 fn no_alloc_unchecked(_: &Arenas, s: &[u8]) -> &'static [u8] {
     // SAFETY: Callers guarantee that `s` remains valid and immutable until the interner is dropped.
     unsafe { std::mem::transmute::<&[u8], &'static [u8]>(s) }
+}
+
+#[inline]
+fn shard_index(hash: u64) -> usize {
+    (hash.wrapping_mul(SHARD_MIX) >> SHARD_SHIFT) as usize
 }
 
 /// A shard of the `[u8] -> Symbol` map: an insert-only open-addressing hash table.
@@ -332,15 +332,6 @@ impl ShardState {
 }
 
 impl Table {
-    /// Returns the mask of slot indices.
-    #[inline]
-    fn mask(&self) -> usize {
-        // SAFETY: Tables are built by `Table::new` with a nonzero number of slots, and `grown`
-        // doubles it. Telling the compiler lets it drop the bounds check on every slot access.
-        unsafe { std::hint::assert_unchecked(!self.slots.is_empty()) };
-        self.slots.len() - 1
-    }
-
     fn new(slots: usize) -> Self {
         Self { slots: (0..slots).map(|_| Slot::default()).collect() }
     }
@@ -390,5 +381,14 @@ impl Table {
             }
             i = (i + 1) & mask;
         }
+    }
+
+    /// Returns the mask of slot indices.
+    #[inline]
+    fn mask(&self) -> usize {
+        // SAFETY: Tables are built by `Table::new` with a nonzero number of slots, and `grown`
+        // doubles it. Telling the compiler lets it drop the bounds check on every slot access.
+        unsafe { std::hint::assert_unchecked(!self.slots.is_empty()) };
+        self.slots.len() - 1
     }
 }

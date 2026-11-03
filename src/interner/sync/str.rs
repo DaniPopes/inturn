@@ -74,4 +74,9 @@ impl<S: InternerSymbol, H: BuildHasher> Interner<S, H> {
             unsafe { std::str::from_utf8_unchecked(s) }
         })
     }
+
+    #[inline]
+    fn get_impl(&self, s: &str) -> Option<S> {
+        self.inner.get(s.as_bytes())
+    }
 }

@@ -257,6 +257,16 @@ macro_rules! impl_interner_api {
             pub fn try_resolve(&self, sym: S) -> Option<&$value> {
                 self.try_resolve_impl(sym)
             }
+
+            /// Returns the `Symbol` of an already interned string, without interning it.
+            ///
+            /// Returns `None` if `s` has not been interned.
+            #[doc = concat!("This is a ", $cheap_op, ".")]
+            #[inline]
+            #[must_use]
+            pub fn get(&self, s: &$value) -> Option<S> {
+                self.get_impl(s)
+            }
         }
     };
 }
@@ -283,11 +293,15 @@ mod tests {
             #[allow(unused_mut)]
             let mut interner = <$ty>::new();
             assert!(interner.is_empty());
+            assert_eq!(interner.get("hello"), None);
 
             let hello = interner.$intern("hello");
             assert_eq!(hello.get(), 0);
             assert_eq!(interner.try_resolve(hello), Some("hello"));
             assert_eq!(interner.resolve(hello), "hello");
+            assert_eq!(interner.len(), 1);
+            assert_eq!(interner.get("hello"), Some(hello));
+            assert_eq!(interner.get("world"), None);
             assert_eq!(interner.len(), 1);
 
             let world = interner.$intern("world");
@@ -441,11 +455,15 @@ mod tests {
         let hello = interner.intern(b"hello");
         assert_eq!(interner.try_resolve(hello), Some(&b"hello"[..]));
         assert_eq!(interner.try_resolve(Symbol::new(1)), None);
+        assert_eq!(interner.get(b"hello"), Some(hello));
+        assert_eq!(interner.get(b"world"), None);
 
         let interner = unsync::BytesInterner::new();
         let hello = interner.intern(b"hello");
         assert_eq!(interner.try_resolve(hello), Some(&b"hello"[..]));
         assert_eq!(interner.try_resolve(Symbol::new(1)), None);
+        assert_eq!(interner.get(b"hello"), Some(hello));
+        assert_eq!(interner.get(b"world"), None);
     }
 
     #[test]
@@ -534,6 +552,9 @@ mod tests {
         assert_eq!(interner.resolve(hello), "hello");
         assert_eq!(interner.resolve(world), "world");
         assert_eq!(interner.len(), 2);
+        assert_eq!(interner.get("hello"), Some(hello));
+        assert_eq!(interner.get("world"), Some(world));
+        assert_eq!(interner.get("other"), None);
 
         let interner = unsync::Interner::<Symbol, _>::with_hasher(std::hash::BuildHasherDefault::<
             MyBadHasher,
@@ -545,5 +566,8 @@ mod tests {
         assert_eq!(interner.resolve(hello), "hello");
         assert_eq!(interner.resolve(world), "world");
         assert_eq!(interner.len(), 2);
+        assert_eq!(interner.get("hello"), Some(hello));
+        assert_eq!(interner.get("world"), Some(world));
+        assert_eq!(interner.get("other"), None);
     }
 }

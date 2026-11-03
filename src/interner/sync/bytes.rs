@@ -115,6 +115,12 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     }
 
     #[inline]
+    fn get_impl(&self, s: &[u8]) -> Option<S> {
+        let hash = self.hash(s);
+        self.shards[shard_index(hash)].find(hash as u32, s).map(S::from_usize)
+    }
+
+    #[inline]
     fn do_intern<'a>(
         &self,
         s: &'a [u8],

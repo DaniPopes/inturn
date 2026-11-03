@@ -94,6 +94,14 @@ impl<S: InternerSymbol, H: BuildHasher> BytesInterner<S, H> {
     }
 
     #[inline]
+    fn get_impl(&self, s: &[u8]) -> Option<S> {
+        let hash = self.hash(s);
+        // SAFETY: This type is not `Sync`, and this method only reads the map.
+        let map = unsafe { &*self.map.get() };
+        map.find(hash, mk_eq(s)).map(|&(_, sym)| sym)
+    }
+
+    #[inline]
     fn do_intern<'a>(
         &self,
         s: &'a [u8],

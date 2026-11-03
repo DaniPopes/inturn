@@ -9,8 +9,8 @@ Efficient, performant, thread-safe bytes/string interning.
 
 This crate was designed to have a lock-free mapping of symbols back to their original string.
 
-It currently uses `dashmap` for deduplicating strings,
-and a lock-free stack to map the string index (symbol) back to the string bytes.
+It deduplicates strings with a sharded, insert-only hash table whose lookups never lock or write,
+and uses a lock-free stack to map the string index (symbol) back to the string bytes.
 
 It supports interning any `&str`/`&[u8]` by allocating it internally in an efficient arena when encountered for the first time,
 or `&'static str`/`&'static [u8]` without allocation.

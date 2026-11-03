@@ -215,9 +215,10 @@ fn no_alloc_unchecked(_: &Arenas, s: &[u8]) -> &'static [u8] {
 /// stored in the slot, and the tag's low bits select the first probe. Storing the tag means that
 /// growing never rehashes a string.
 ///
-/// Each shard has its own cache line, so an insertion does not invalidate the lines that
-/// lock-free hits on other shards read.
-#[repr(align(64))]
+/// Each shard has its own pair of cache lines, so an insertion does not invalidate the lines that
+/// lock-free hits on other shards read. Pairs, because some CPUs prefetch the neighbour of a 64-byte
+/// line and some have 128-byte lines.
+#[repr(align(128))]
 struct Shard {
     /// The latest table in `state.tables`.
     ///

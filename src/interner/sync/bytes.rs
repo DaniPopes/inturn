@@ -257,18 +257,31 @@ struct Slot {
 }
 
 impl Slot {
-    /// Returns the symbol index plus one, the tag and the key, or `None` if the slot is empty.
+    /// Returns the symbol index plus one, or zero if the slot is empty.
+    ///
+    /// The `Acquire` load makes the other fields visible when it returns nonzero.
     #[inline]
-    fn load(&self) -> Option<(u32, u32, &'static [u8])> {
-        let sym = self.sym.load(Ordering::Acquire);
-        if sym == 0 {
-            return None;
-        }
+    fn sym(&self) -> u32 {
+        self.sym.load(Ordering::Acquire)
+    }
+
+    #[inline]
+    fn tag(&self) -> u32 {
+        self.tag.load(Ordering::Relaxed)
+    }
+
+    /// Returns the key.
+    ///
+    /// # Safety
+    ///
+    /// A call to [`Self::sym`] on this slot must have returned nonzero.
+    #[inline]
+    unsafe fn key(&self) -> &'static [u8] {
         let (ptr, len) = (self.ptr.load(Ordering::Relaxed), self.len.load(Ordering::Relaxed));
         debug_assert!(!ptr.is_null(), "slot published before its key");
-        // SAFETY: `store` wrote a `&'static [u8]`, and the `Acquire` load of `sym` made it visible.
-        let key = unsafe { slice::from_raw_parts(ptr, len) };
-        Some((sym, self.tag.load(Ordering::Relaxed), key))
+        // SAFETY: `store` wrote a `&'static [u8]`, and the caller's `Acquire` load of `sym` made it
+        // visible.
+        unsafe { slice::from_raw_parts(ptr, len) }
     }
 
     /// Fills an empty slot. Must only be called with the shard lock held.
@@ -323,8 +336,12 @@ impl Table {
     /// Returns a table with twice the slots and the same entries.
     fn grown(&self) -> Self {
         let new = Self::new(self.slots.len() * 2);
-        for (sym, tag, key) in self.slots.iter().filter_map(Slot::load) {
-            new.insert(tag, key, sym);
+        for slot in &self.slots {
+            let sym = slot.sym();
+            if sym != 0 {
+                // SAFETY: `sym` is nonzero.
+                new.insert(slot.tag(), unsafe { slot.key() }, sym);
+            }
         }
         new
     }
@@ -334,8 +351,14 @@ impl Table {
         let mask = self.slots.len() - 1;
         let mut i = tag as usize & mask;
         loop {
-            let (sym, slot_tag, slot_key) = self.slots[i].load()?;
-            if slot_tag == tag && slot_key == key {
+            let slot = &self.slots[i];
+            let sym = slot.sym();
+            if sym == 0 {
+                return None;
+            }
+            // The key is only loaded when the tag matches.
+            // SAFETY: `sym` is nonzero.
+            if slot.tag() == tag && unsafe { slot.key() } == key {
                 return Some(sym as usize - 1);
             }
             i = (i + 1) & mask;

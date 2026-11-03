@@ -9,7 +9,6 @@ license = "MIT OR Apache-2.0"
 categories = ["caching"]
 keywords = ["symbol", "interning", "string-interning", "hash", "cache"]
 documentation = "https://docs.rs/inturn"
-homepage = "https://github.com/danipopes/inturn"
 repository = "https://github.com/danipopes/inturn"
 exclude = [".github/", "benches/", "fuzz/", "tests/"]
 

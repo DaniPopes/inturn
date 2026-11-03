@@ -35,6 +35,8 @@ type Arenas = ThreadLocal<Bump>;
 /// Byte string interner.
 ///
 /// See the [crate-level docs][crate] for more details.
+///
+/// Holds at most `u32::MAX - 1` strings; interning more panics.
 pub struct BytesInterner<S = Symbol, H = RandomState> {
     shards: Box<[Shard]>,
     hash_builder: H,
@@ -212,6 +214,10 @@ fn no_alloc_unchecked(_: &Arenas, s: &[u8]) -> &'static [u8] {
 /// counts, even if the hasher only fills the low 32 bits. The low 32 bits of the hash are the `tag`
 /// stored in the slot, and the tag's low bits select the first probe. Storing the tag means that
 /// growing never rehashes a string.
+///
+/// Each shard has its own cache line, so an insertion does not invalidate the lines that
+/// lock-free hits on other shards read.
+#[repr(align(64))]
 struct Shard {
     /// The latest table in `state.tables`.
     ///
